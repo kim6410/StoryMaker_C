@@ -3,28 +3,56 @@
 {% block content %}
 <div class="page-head">
   <h1>마이페이지</h1>
-  <p>콘텐츠 제작에 사용할 업체 정보를 관리합니다. (업체 정보 저장은 다음 단계에서 연결됩니다)</p>
+  <p>콘텐츠 제작에 사용할 업체 정보를 관리합니다.</p>
 </div>
 
 <div class="tabs" data-tabs>
-  <button class="tab active" data-tab="profile">업체 정보</button>
-  <button class="tab" data-tab="account">계정</button>
+  <button class="tab {{ 'active' if tab != 'account' else '' }}" data-tab="profile">업체 정보</button>
+  <button class="tab {{ 'active' if tab == 'account' else '' }}" data-tab="account">계정</button>
 </div>
 
-<div data-tab-panel="profile" class="card company-form">
-  <div class="grid cols-2">
-    <div class="field"><label>업체명</label><input type="text" value="오박사만능설비" disabled></div>
-    <div class="field"><label>대표자명</label><input type="text" value="김오박" disabled></div>
-    <div class="field"><label>전화번호</label><input type="text" value="010-1234-5678" disabled></div>
-    <div class="field"><label>업종</label><select disabled><option>보일러·설비</option></select></div>
-  </div>
-  <div style="color:var(--muted);font-size:12px">업체 정보 저장 기능은 다음 단계(마이페이지·업체 정보)에서 실제 DB에 연결됩니다.</div>
+{% if saved %}
+<div class="card" style="border-color:var(--ok);color:var(--ok);font-size:13px;margin-bottom:14px">업체 정보를 저장했습니다.</div>
+{% endif %}
+{% if error and tab != 'account' %}
+<div class="card" style="border-color:var(--danger);color:var(--danger);font-size:13px;margin-bottom:14px">{{ error }}</div>
+{% endif %}
+
+<div data-tab-panel="profile" class="card company-form" style="display:{{ 'none' if tab == 'account' else '' }}">
+  <form method="post" action="/mypage/company">
+    <div class="grid cols-2">
+      <div class="field"><label>업체명 *</label><input type="text" name="company_name" value="{{ company.company_name if company else '' }}" required></div>
+      <div class="field"><label>대표자명</label><input type="text" name="owner_name" value="{{ company.owner_name if company else '' }}"></div>
+      <div class="field"><label>전화번호</label><input type="text" name="phone_number" value="{{ company.phone_number if company else '' }}"></div>
+      <div class="field">
+        <label>업종</label>
+        <select name="industry">
+          {% set cur_industry = company.industry if company else '' %}
+          {% for key, label in [('general','일반 업종'),('home_repair','집수리·인테리어'),('boiler_facility','보일러·설비'),('appliance_clean','가전 청소'),('general_cleaning','청소'),('restaurant','음식점'),('cafe','카페'),('beauty_wellness','미용·웰니스'),('car_repair','자동차 정비'),('pet_beauty_hotel','반려동물'),('real_estate','부동산'),('education_academy','교육·학원')] %}
+          <option value="{{ key }}" {{ 'selected' if cur_industry == key else '' }}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="field"><label>지역</label><input type="text" name="region" value="{{ company.region if company else '' }}" placeholder="예: 서울 강북구"></div>
+      <div class="field"><label>주소</label><input type="text" name="address" value="{{ company.address if company else '' }}"></div>
+    </div>
+    <div class="field"><label>주요 서비스</label><input type="text" name="main_services" value="{{ company.main_services if company else '' }}" placeholder="쉼표로 구분"></div>
+    <div class="field"><label>고객층</label><input type="text" name="target_customers" value="{{ company.target_customers if company else '' }}"></div>
+    <div class="field"><label>핵심 강점 / 소개글</label><textarea name="core_strength">{{ company.core_strength if company else '' }}</textarea></div>
+    <div class="grid cols-2">
+      <div class="field"><label>원하는 말투</label><input type="text" name="tone_preference" value="{{ company.tone_preference if company else '' }}" placeholder="예: 친근한 존댓말"></div>
+      <div class="field"><label>금지 표현</label><input type="text" name="forbidden_words" value="{{ company.forbidden_words if company else '' }}"></div>
+    </div>
+    <div class="field"><label>홈페이지 및 SNS 주소</label><input type="text" name="website_url" value="{{ company.website_url if company else '' }}"></div>
+    <div class="field"><label>자유 요청사항</label><textarea name="free_request">{{ company.free_request if company else '' }}</textarea></div>
+    <button class="btn" style="width:auto;padding:0 20px" type="submit">저장</button>
+  </form>
 </div>
 
-<div data-tab-panel="account" class="card" style="display:none">
+<div data-tab-panel="account" class="card" style="display:{{ '' if tab == 'account' else 'none' }}">
   <h3 style="margin-top:0">로그인 비밀번호 변경</h3>
   <p style="color:var(--muted);font-size:12px;margin-top:-6px">실제로 이 프로젝트 자체 계정 비밀번호가 변경되며, 완료 후 모든 기기에서 다시 로그인해야 합니다.</p>
-  {% if error %}
+  {% if error and tab == 'account' %}
   <div class="card" style="border-color:var(--danger);color:var(--danger);font-size:13px;margin-bottom:14px">{{ error }}</div>
   {% endif %}
   <form method="post" action="/auth/change-password">

@@ -251,6 +251,79 @@ def list_audit_logs(limit: int = 100) -> list[dict]:
         return [dict(r) for r in rows]
 
 
+def create_company(user_id: int, fields: dict) -> int:
+    now = _now()
+    with get_connection() as conn:
+        existing_default = conn.execute(
+            "SELECT id FROM companies WHERE user_id=? AND is_default=1", (user_id,)
+        ).fetchone()
+        is_default = 0 if existing_default else 1
+        cur = conn.execute(
+            """
+            INSERT INTO companies
+                (user_id, company_name, owner_name, phone_number, industry, region, address,
+                 main_services, target_customers, core_strength, tone_preference, forbidden_words,
+                 website_url, free_request, is_default, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                user_id,
+                fields.get("company_name", ""), fields.get("owner_name", ""),
+                fields.get("phone_number", ""), fields.get("industry", ""),
+                fields.get("region", ""), fields.get("address", ""),
+                fields.get("main_services", ""), fields.get("target_customers", ""),
+                fields.get("core_strength", ""), fields.get("tone_preference", ""),
+                fields.get("forbidden_words", ""), fields.get("website_url", ""),
+                fields.get("free_request", ""), is_default, now, now,
+            ),
+        )
+        return int(cur.lastrowid)
+
+
+def update_company(company_id: int, user_id: int, fields: dict) -> bool:
+    with get_connection() as conn:
+        cur = conn.execute(
+            """
+            UPDATE companies SET
+                company_name=?, owner_name=?, phone_number=?, industry=?, region=?, address=?,
+                main_services=?, target_customers=?, core_strength=?, tone_preference=?,
+                forbidden_words=?, website_url=?, free_request=?, updated_at=?
+            WHERE id=? AND user_id=?
+            """,
+            (
+                fields.get("company_name", ""), fields.get("owner_name", ""),
+                fields.get("phone_number", ""), fields.get("industry", ""),
+                fields.get("region", ""), fields.get("address", ""),
+                fields.get("main_services", ""), fields.get("target_customers", ""),
+                fields.get("core_strength", ""), fields.get("tone_preference", ""),
+                fields.get("forbidden_words", ""), fields.get("website_url", ""),
+                fields.get("free_request", ""), _now(), company_id, user_id,
+            ),
+        )
+        return cur.rowcount > 0
+
+
+def get_default_company_for_user(user_id: int) -> Optional[dict]:
+    with get_readonly_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM companies WHERE user_id=? AND is_default=1 LIMIT 1", (user_id,)
+        ).fetchone()
+        if row:
+            return dict(row)
+        row = conn.execute(
+            "SELECT * FROM companies WHERE user_id=? ORDER BY created_at LIMIT 1", (user_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def list_companies_for_user(user_id: int) -> list[dict]:
+    with get_readonly_connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM companies WHERE user_id=? ORDER BY is_default DESC, created_at", (user_id,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
 def count_audit_logs() -> int:
     with get_readonly_connection() as conn:
         row = conn.execute("SELECT COUNT(*) FROM audit_logs").fetchone()

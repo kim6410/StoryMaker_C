@@ -148,10 +148,40 @@ def _migration_002_auth_tables(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_003_companies(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE companies (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            company_name TEXT NOT NULL,
+            owner_name TEXT NOT NULL DEFAULT '',
+            phone_number TEXT NOT NULL DEFAULT '',
+            industry TEXT NOT NULL DEFAULT '',
+            region TEXT NOT NULL DEFAULT '',
+            address TEXT NOT NULL DEFAULT '',
+            main_services TEXT NOT NULL DEFAULT '',
+            target_customers TEXT NOT NULL DEFAULT '',
+            core_strength TEXT NOT NULL DEFAULT '',
+            tone_preference TEXT NOT NULL DEFAULT '',
+            forbidden_words TEXT NOT NULL DEFAULT '',
+            website_url TEXT NOT NULL DEFAULT '',
+            free_request TEXT NOT NULL DEFAULT '',
+            is_default INTEGER NOT NULL DEFAULT 0 CHECK (is_default IN (0,1)),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE INDEX idx_companies_user ON companies(user_id);
+        """
+    )
+
+
 # 순서대로 등록. 이미 적용된 번호는 다시 실행하지 않는다.
 MIGRATIONS: list[Migration] = [
     (1, "initial_schema", _migration_001_initial_schema),
     (2, "auth_tables", _migration_002_auth_tables),
+    (3, "companies", _migration_003_companies),
 ]
 
 

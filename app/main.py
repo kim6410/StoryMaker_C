@@ -7,7 +7,7 @@ StoryMaker Claude Lab - 3단계: 회원가입/로그인/세션을 자체 DB로 �
 """
 from __future__ import annotations
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Form
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -221,11 +221,56 @@ def archive_detail_page(request: Request, item_id: str):
 
 
 @app.get("/mypage")
-def mypage_page(request: Request, error: str = ""):
+def mypage_page(request: Request, error: str = "", saved: int = 0, tab: str = "profile"):
     user = _require_login_or_redirect(request)
     if not user:
         return RedirectResponse(url="/login")
-    return templates.TemplateResponse("mypage.html", _ctx(request, user, active="mypage", error=error))
+    from app.db import repository as repo
+    company = repo.get_default_company_for_user(user["id"])
+    return templates.TemplateResponse("mypage.html", _ctx(
+        request, user, active="mypage", error=error, saved=saved, tab=tab, company=company,
+    ))
+
+
+@app.post("/mypage/company")
+def save_company(
+    request: Request,
+    company_name: str = Form(""),
+    owner_name: str = Form(""),
+    phone_number: str = Form(""),
+    industry: str = Form(""),
+    region: str = Form(""),
+    address: str = Form(""),
+    main_services: str = Form(""),
+    target_customers: str = Form(""),
+    core_strength: str = Form(""),
+    tone_preference: str = Form(""),
+    forbidden_words: str = Form(""),
+    website_url: str = Form(""),
+    free_request: str = Form(""),
+):
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    if not company_name.strip():
+        return RedirectResponse(url="/mypage?error=업체명은+필수입니다.", status_code=303)
+    from app.db import repository as repo
+    fields = {
+        "company_name": company_name.strip(), "owner_name": owner_name.strip(),
+        "phone_number": phone_number.strip(), "industry": industry.strip(),
+        "region": region.strip(), "address": address.strip(),
+        "main_services": main_services.strip(), "target_customers": target_customers.strip(),
+        "core_strength": core_strength.strip(), "tone_preference": tone_preference.strip(),
+        "forbidden_words": forbidden_words.strip(), "website_url": website_url.strip(),
+        "free_request": free_request.strip(),
+    }
+    existing = repo.get_default_company_for_user(user["id"])
+    if existing:
+        repo.update_company(existing["id"], user["id"], fields)
+    else:
+        repo.create_company(user["id"], fields)
+    repo.write_audit_log(user["id"], "company_saved", target_type="company")
+    return RedirectResponse(url="/mypage?saved=1", status_code=303)
 
 
 @app.get("/subscription")
