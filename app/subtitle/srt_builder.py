@@ -121,6 +121,12 @@ def build_srt_for_project(project: dict) -> SrtOutcome:
     return SrtOutcome(ok=True, cue_count=len(sentences), last_cue_end_seconds=last_cue_end, drift_seconds=drift)
 
 
+def srt_timestamp_to_seconds(ts: str) -> float:
+    hms, _, ms = ts.strip().partition(",")
+    h, m, s = hms.split(":")
+    return int(h) * 3600 + int(m) * 60 + int(s) + int(ms) / 1000.0
+
+
 def parse_srt(path: Path) -> list[dict]:
     """검증용: 만든 SRT가 실제로 파싱 가능한지 확인한다."""
     text = path.read_text(encoding="utf-8")

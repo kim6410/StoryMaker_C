@@ -49,6 +49,20 @@ SUPERTONIC_VOICE_MALE = _os.environ.get("SUPERTONIC_VOICE_MALE") or "M1"
 SUPERTONIC_DEFAULT_SPEED = 1.0
 SUPERTONIC_SENTENCE_GAP_SECONDS = 0.4
 
+# 단계8: FFmpeg MP4 렌더. 폰트는 프로젝트 전용 경로에 직접 내려받아 사용한다
+# (OS 폰트나 V1·Beta 자산을 참조하지 않는다. 오픈폰트 라이선스, 출처는 runtime/fonts/OFL.txt).
+MP4_WIDTH = 1080
+MP4_HEIGHT = 1920
+MP4_FPS = 30
+MP4_START_LEAD_SECONDS = 1.5   # 배경음악 페이드인 구간, 이 시간이 지난 뒤 TTS 시작
+MP4_END_HOLD_SECONDS = 2.0     # 마지막 TTS 종료 후 배경음악 페이드아웃 + 엔딩 카드 유지 시간
+MP4_TRANSITION_MAX_SECONDS = 2.5
+FONT_BOLD_PATH = PROJECT_ROOT / "runtime" / "fonts" / "NanumGothic-Bold.ttf"
+FONT_REGULAR_PATH = PROJECT_ROOT / "runtime" / "fonts" / "NanumGothic-Regular.ttf"
+# TTS 발화 구간 배경음악 음량(덕킹, 선형 배율) / 무음(리드인·엔딩) 구간 음량 3단계
+MUSIC_DUCKED_VOLUME = {"quiet": 0.08, "normal": 0.14, "loud": 0.20}
+MUSIC_SOLO_VOLUME = {"quiet": 0.30, "normal": 0.45, "loud": 0.60}
+
 for _d in (DATA_DIR, JOBS_DIR, MEDIA_DIR, LOGS_DIR, BACKUPS_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 

@@ -80,5 +80,8 @@
 
 <div style="display:flex;gap:10px;margin-top:20px">
   <a class="btn secondary" style="width:auto;padding:0 24px" href="/content/job/{{ project.job_uid }}/channels">채널 결과로 돌아가기</a>
+  {% if srt and srt.status == 'success' %}
+  <a class="btn" style="width:auto;padding:0 24px" href="/content/job/{{ project.job_uid }}/mp4">다음: 영상(MP4) 만들기</a>
+  {% endif %}
 </div>
 {% endblock %}

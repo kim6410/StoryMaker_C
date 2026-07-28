@@ -923,3 +923,107 @@ def get_srt_for_project(project_id: int) -> Optional[dict]:
     with get_readonly_connection() as conn:
         row = conn.execute("SELECT * FROM content_srt WHERE project_id=?", (project_id,)).fetchone()
         return dict(row) if row else None
+
+
+# ---------------------------------------------------------------------------
+# content_scenes / content_music_mix / content_mp4 (단계8)
+# ---------------------------------------------------------------------------
+def replace_scenes(project_id: int, scenes: list[dict]) -> None:
+    now = _now()
+    with get_connection() as conn:
+        conn.execute("DELETE FROM content_scenes WHERE project_id=?", (project_id,))
+        conn.executemany(
+            """
+            INSERT INTO content_scenes
+                (project_id, scene_index, sentence_index, start_seconds, duration_seconds,
+                 zoom_type, zoom_start, zoom_end, transition_in_seconds, color0, color1,
+                 relative_clip_path, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (project_id, s["scene_index"], s["sentence_index"], s["start_seconds"],
+                 s["duration_seconds"], s["zoom_type"], s["zoom_start"], s["zoom_end"],
+                 s["transition_in_seconds"], s["color0"], s["color1"], s.get("relative_clip_path", ""), now)
+                for s in scenes
+            ],
+        )
+
+
+def list_scenes_for_project(project_id: int) -> list[dict]:
+    with get_readonly_connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM content_scenes WHERE project_id=? ORDER BY scene_index", (project_id,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def upsert_music_mix(project_id: int, status: str, source_relative_path: str = "",
+                      volume_level: str = "normal", relative_mixed_audio_path: str = "",
+                      total_duration_seconds: float = 0.0, error_code: str = "") -> None:
+    now = _now()
+    with get_connection() as conn:
+        existing = conn.execute("SELECT id FROM content_music_mix WHERE project_id=?", (project_id,)).fetchone()
+        if existing:
+            conn.execute(
+                """
+                UPDATE content_music_mix SET
+                    status=?, source_relative_path=?, volume_level=?, relative_mixed_audio_path=?,
+                    total_duration_seconds=?, error_code=?, updated_at=?
+                WHERE id=?
+                """,
+                (status, source_relative_path, volume_level, relative_mixed_audio_path,
+                 total_duration_seconds, error_code, now, existing["id"]),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO content_music_mix
+                    (project_id, source_relative_path, volume_level, relative_mixed_audio_path,
+                     total_duration_seconds, status, error_code, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (project_id, source_relative_path, volume_level, relative_mixed_audio_path,
+                 total_duration_seconds, status, error_code, now, now),
+            )
+
+
+def get_music_mix_for_project(project_id: int) -> Optional[dict]:
+    with get_readonly_connection() as conn:
+        row = conn.execute("SELECT * FROM content_music_mix WHERE project_id=?", (project_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def upsert_mp4_result(project_id: int, status: str, relative_mp4_path: str = "", width: int = 0,
+                       height: int = 0, fps: float = 0.0, video_codec: str = "", audio_codec: str = "",
+                       duration_seconds: float = 0.0, file_size_bytes: int = 0, error_code: str = "") -> None:
+    now = _now()
+    with get_connection() as conn:
+        existing = conn.execute("SELECT id FROM content_mp4 WHERE project_id=?", (project_id,)).fetchone()
+        if existing:
+            conn.execute(
+                """
+                UPDATE content_mp4 SET
+                    status=?, relative_mp4_path=?, width=?, height=?, fps=?, video_codec=?, audio_codec=?,
+                    duration_seconds=?, file_size_bytes=?, error_code=?, updated_at=?
+                WHERE id=?
+                """,
+                (status, relative_mp4_path, width, height, fps, video_codec, audio_codec,
+                 duration_seconds, file_size_bytes, error_code, now, existing["id"]),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO content_mp4
+                    (project_id, relative_mp4_path, width, height, fps, video_codec, audio_codec,
+                     duration_seconds, file_size_bytes, status, error_code, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (project_id, relative_mp4_path, width, height, fps, video_codec, audio_codec,
+                 duration_seconds, file_size_bytes, status, error_code, now, now),
+            )
+
+
+def get_mp4_for_project(project_id: int) -> Optional[dict]:
+    with get_readonly_connection() as conn:
+        row = conn.execute("SELECT * FROM content_mp4 WHERE project_id=?", (project_id,)).fetchone()
+        return dict(row) if row else None

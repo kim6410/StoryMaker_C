@@ -523,6 +523,78 @@ def content_job_subtitle_download(request: Request, job_uid: str):
     return FileResponse(path, media_type="application/x-subrip", filename="subtitle.srt")
 
 
+@app.post("/content/job/{job_uid}/mp4/generate")
+def content_job_mp4_generate(request: Request, job_uid: str):
+    """단계8: 배경음악 혼합 + 장면 구성 + FFmpeg 렌더로 최종 MP4를 만든다."""
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    project = _get_owned_project_or_none(job_uid, user)
+    if not project:
+        return RedirectResponse(url="/content/new")
+
+    from app.media.service import generate_mp4_for_project
+    from app.db import repository as repo
+    outcome = generate_mp4_for_project(project)
+    repo.write_audit_log(
+        user["id"], "mp4_generated", target_type="project", target_id=project["id"],
+        metadata_json=f'{{"ok": {str(outcome.ok).lower()}, "error_code": "{outcome.error_code}"}}',
+    )
+    if outcome.ok:
+        return RedirectResponse(url=f"/content/job/{job_uid}/mp4", status_code=303)
+    return RedirectResponse(url=f"/content/job/{job_uid}/mp4?mp4_error={outcome.error_code}", status_code=303)
+
+
+@app.get("/content/job/{job_uid}/mp4")
+def content_job_mp4_page(request: Request, job_uid: str, mp4_error: str = ""):
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    project = _get_owned_project_or_none(job_uid, user)
+    if not project:
+        return RedirectResponse(url="/content/new")
+
+    from app.db import repository as repo
+    mp4 = repo.get_mp4_for_project(project["id"])
+    music_mix = repo.get_music_mix_for_project(project["id"])
+    scenes = repo.list_scenes_for_project(project["id"])
+    master = repo.get_tts_master_for_project(project["id"])
+    srt = repo.get_srt_for_project(project["id"])
+    has_tts = bool(master and master["status"] == "success" and srt and srt["status"] == "success")
+
+    mp4_error_message = ""
+    if mp4_error:
+        from app.media.service import USER_MP4_ERROR_MESSAGES
+        mp4_error_message = USER_MP4_ERROR_MESSAGES.get(mp4_error, "")
+
+    return templates.TemplateResponse("content_job_mp4.html", _ctx(
+        request, user, active="content_new", project=project, mp4=mp4, music_mix=music_mix,
+        scenes=scenes, has_tts=has_tts, mp4_error_message=mp4_error_message,
+    ))
+
+
+@app.get("/content/job/{job_uid}/mp4/video")
+def content_job_mp4_video(request: Request, job_uid: str):
+    from fastapi import HTTPException
+    from fastapi.responses import FileResponse
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    project = _get_owned_project_or_none(job_uid, user)
+    if not project:
+        return RedirectResponse(url="/content/new")
+
+    from app.db import repository as repo
+    from app.config import PROJECT_ROOT
+    mp4 = repo.get_mp4_for_project(project["id"])
+    if not mp4 or mp4["status"] != "success":
+        raise HTTPException(status_code=404, detail="MP4가 아직 없습니다.")
+    path = PROJECT_ROOT / mp4["relative_mp4_path"]
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="MP4 파일을 찾을 수 없습니다.")
+    return FileResponse(path, media_type="video/mp4", filename="content.mp4")
+
+
 @app.get("/content/channels")
 def content_channels_page(request: Request):
     user = _require_login_or_redirect(request)

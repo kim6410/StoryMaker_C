@@ -164,6 +164,16 @@ SRT_ERR_INCOMPLETE_AUDIO = "incomplete_audio"
 SRT_ERR_DRIFT_EXCEEDED = "drift_exceeded"
 SRT_SYNC_TOLERANCE_SECONDS = 0.5
 
+# ---- 단계8: MP4 렌더 오류 코드 ----
+MP4_ERR_NO_TTS = "no_tts"
+MP4_ERR_SCENE_RENDER_FAILED = "scene_render_failed"
+MP4_ERR_CONCAT_FAILED = "concat_failed"
+MP4_ERR_AUDIO_MIX_FAILED = "audio_mix_failed"
+MP4_ERR_MUX_FAILED = "mux_failed"
+MP4_ERR_VERIFY_FAILED = "verify_failed"
+
+MUSIC_VOLUME_LEVELS = ("quiet", "normal", "loud")
+
 # ---- 보관함 미디어 종류 ----
 MEDIA_TYPE_IMAGE = "image"
 MEDIA_TYPE_AUDIO = "audio"

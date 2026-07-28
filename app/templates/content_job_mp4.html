@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}영상(MP4) - {{ app_name }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>{{ project.title }}</h1>
+  <p>음성·자막·배경음악·업체 정보를 합쳐 최종 영상(MP4)을 만듭니다.</p>
+</div>
+
+{% if not has_tts %}
+<div class="card" style="border-color:var(--warn)">
+  <p style="color:var(--warn);font-size:12px;margin:0">
+    아직 음성·자막이 없습니다. 먼저 <a href="/content/job/{{ project.job_uid }}/tts">음성·자막(TTS·SRT) 만들기</a>를 완료해 주세요.
+  </p>
+</div>
+{% else %}
+
+<div class="card">
+  <form method="post" action="/content/job/{{ project.job_uid }}/mp4/generate">
+    <button class="btn" type="submit" style="width:auto;padding:0 20px">
+      {% if mp4 and mp4.status == 'success' %}영상 다시 만들기{% else %}영상(MP4) 만들기{% endif %}
+    </button>
+  </form>
+
+  {% if mp4_error_message %}
+  <p style="color:var(--warn);font-size:12px;margin:10px 0 0">{{ mp4_error_message }}</p>
+  {% endif %}
+
+  {% if mp4 %}
+  <p style="color:var(--muted);font-size:12px;margin:10px 0 0">
+    상태: <b>{{ mp4.status }}</b>{% if mp4.error_code %} ({{ mp4.error_code }}){% endif %}
+    {% if mp4.status == 'success' %}
+    · {{ mp4.width }}x{{ mp4.height }} · {{ mp4.fps|int }}fps · {{ mp4.video_codec }}/{{ mp4.audio_codec }}
+    · {{ '%.1f'|format(mp4.duration_seconds) }}초 · {{ (mp4.file_size_bytes / 1024 / 1024)|round(1) }}MB
+    {% endif %}
+  </p>
+  {% endif %}
+
+  {% if mp4 and mp4.status == 'success' %}
+  <video controls style="width:100%;max-width:400px;margin-top:12px;border-radius:8px"
+         src="/content/job/{{ project.job_uid }}/mp4/video"></video>
+  {% endif %}
+
+  {% if music_mix %}
+  <p style="color:var(--muted);font-size:12px;margin:10px 0 0">
+    배경음악: {{ music_mix.source_relative_path.split('/')[-1] if music_mix.source_relative_path else '사용 안 함' }}
+    · 음량: {{ music_mix.volume_level }} · 상태: {{ music_mix.status }}
+  </p>
+  {% endif %}
+</div>
+
+{% if scenes %}
+<div class="card" style="margin-top:14px">
+  <h3 style="margin-top:0">장면 구성 ({{ scenes|length }}개)</h3>
+  <table>
+    <thead><tr><th>#</th><th>시작</th><th>길이</th><th>줌</th><th>전환</th></tr></thead>
+    <tbody>
+      {% for s in scenes %}
+      <tr>
+        <td>{{ s.scene_index + 1 }}</td>
+        <td>{{ '%.1f'|format(s.start_seconds) }}초</td>
+        <td>{{ '%.1f'|format(s.duration_seconds) }}초</td>
+        <td>{{ s.zoom_type }}</td>
+        <td>{{ '%.1f'|format(s.transition_in_seconds) }}초</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% endif %}
+
+<div style="display:flex;gap:10px;margin-top:20px">
+  <a class="btn secondary" style="width:auto;padding:0 24px" href="/content/job/{{ project.job_uid }}/tts">음성·자막으로 돌아가기</a>
+</div>
+{% endblock %}

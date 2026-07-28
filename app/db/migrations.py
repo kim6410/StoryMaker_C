@@ -359,6 +359,61 @@ def _migration_008_tts_subtitle(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_009_mp4_render(conn: sqlite3.Connection) -> None:
+    """단계8: 장면 타임라인, 배경음악 혼합, 최종 MP4 산출 결과를 저장한다."""
+    conn.executescript(
+        """
+        CREATE TABLE content_scenes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            scene_index INTEGER NOT NULL,
+            sentence_index INTEGER NOT NULL,
+            start_seconds REAL NOT NULL DEFAULT 0,
+            duration_seconds REAL NOT NULL DEFAULT 0,
+            zoom_type TEXT NOT NULL DEFAULT 'static',
+            zoom_start REAL NOT NULL DEFAULT 1.0,
+            zoom_end REAL NOT NULL DEFAULT 1.0,
+            transition_in_seconds REAL NOT NULL DEFAULT 0,
+            color0 TEXT NOT NULL DEFAULT '',
+            color1 TEXT NOT NULL DEFAULT '',
+            relative_clip_path TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL
+        );
+        CREATE UNIQUE INDEX idx_content_scenes_project_index ON content_scenes(project_id, scene_index);
+
+        CREATE TABLE content_music_mix (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL UNIQUE REFERENCES projects(id) ON DELETE CASCADE,
+            source_relative_path TEXT NOT NULL DEFAULT '',
+            volume_level TEXT NOT NULL DEFAULT 'normal',
+            relative_mixed_audio_path TEXT NOT NULL DEFAULT '',
+            total_duration_seconds REAL NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','success','failed')),
+            error_code TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE content_mp4 (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL UNIQUE REFERENCES projects(id) ON DELETE CASCADE,
+            relative_mp4_path TEXT NOT NULL DEFAULT '',
+            width INTEGER NOT NULL DEFAULT 0,
+            height INTEGER NOT NULL DEFAULT 0,
+            fps REAL NOT NULL DEFAULT 0,
+            video_codec TEXT NOT NULL DEFAULT '',
+            audio_codec TEXT NOT NULL DEFAULT '',
+            duration_seconds REAL NOT NULL DEFAULT 0,
+            file_size_bytes INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','rendering','success','failed')),
+            error_code TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        """
+    )
+
+
 # 순서대로 등록. 이미 적용된 번호는 다시 실행하지 않는다.
 MIGRATIONS: list[Migration] = [
     (1, "initial_schema", _migration_001_initial_schema),
@@ -369,6 +424,7 @@ MIGRATIONS: list[Migration] = [
     (6, "content_generation", _migration_006_content_generation),
     (7, "channel_results", _migration_007_channel_results),
     (8, "tts_subtitle", _migration_008_tts_subtitle),
+    (9, "mp4_render", _migration_009_mp4_render),
 ]
 
 
