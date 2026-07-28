@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}SNS 8채널 결과 - {{ app_name }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>SNS 8채널 원고</h1>
+  <p>채널마다 직접 수정하고 복사할 수 있습니다.</p>
+</div>
+
+<div class="steps">
+  <span class="step done">1. 정보 입력</span>
+  <span class="step current">2. SNS 8채널</span>
+  <span class="step">3. 음성·자막·MP4</span>
+  <span class="step">4. 썸네일 선택</span>
+  <span class="step">5. 보관함 저장</span>
+</div>
+
+<div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+  <button class="btn secondary" style="width:auto;padding:0 16px" data-toast-msg="전체 8채널을 복사했습니다. (샘플)">전체 복사</button>
+</div>
+
+<div class="grid cols-2">
+  {% for ch in channels %}
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <b>{{ ch.name }}</b>
+      <button class="btn ghost" data-copy="#chan-{{ loop.index }}">복사</button>
+    </div>
+    <div id="chan-{{ loop.index }}">
+      <div style="font-weight:800;margin-bottom:6px">{{ ch.title }}</div>
+      <div style="color:var(--muted);font-size:13px;margin-bottom:8px">{{ ch.body }}</div>
+      <div style="color:var(--accent);font-size:12px">{{ ch.hashtags }}</div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+<a class="btn" style="margin-top:20px;width:auto;padding:0 24px" href="/content/media?role={{ role_switch }}" data-once>다음: 음성·자막·MP4 제작</a>
+{% endblock %}

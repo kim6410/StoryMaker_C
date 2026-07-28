@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}보관함 - {{ app_name }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>보관함</h1>
+  <p>완료된 콘텐츠를 모아 볼 수 있습니다. 상세정보는 항목을 클릭할 때만 불러옵니다.</p>
+</div>
+
+<div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+  <input type="text" placeholder="제목 또는 업체명 검색" style="height:40px;border:1px solid var(--border);border-radius:10px;background:#0c1322;color:var(--text);padding:0 12px;flex:1;min-width:180px">
+  <select style="height:40px;border:1px solid var(--border);border-radius:10px;background:#0c1322;color:var(--text);padding:0 10px">
+    <option>최신순</option><option>오래된순</option><option>용량순</option>
+  </select>
+</div>
+
+{% if items %}
+<div class="grid cols-3">
+  {% for item in items %}
+  <a class="card" href="/archive/{{ item.id }}?role={{ role_switch }}" style="display:block">
+    <div style="aspect-ratio:9/16;border-radius:10px;background:linear-gradient(160deg,#1b2740,#0e1526);margin-bottom:10px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:12px">썸네일</div>
+    <b>{{ item.title }}</b>
+    <div style="color:var(--muted);font-size:12px;margin:6px 0">{{ item.company }} · {{ item.created_at }}</div>
+    <span class="badge ok">{{ item.status }}</span>
+    <span class="badge muted">{{ item.size }}</span>
+  </a>
+  {% endfor %}
+</div>
+<div style="margin-top:14px;color:var(--muted);font-size:12px">무료 플랜: 실제 미디어가 있는 최신 10개까지 유지됩니다.</div>
+{% else %}
+<div class="empty">아직 완료된 콘텐츠가 없습니다. "새 콘텐츠 제작"에서 첫 작업을 시작해 보세요.</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,17 @@
+{% extends "auth_base.html" %}
+{% block title %}이메일 인증 대기 - {{ app_name }}{% endblock %}
+{% block content %}
+<div class="auth-sub" style="font-size:15px;color:var(--text)">
+  <b>{{ sample_email }}</b> 주소로 인증 메일을 보냈습니다.
+</div>
+<div class="card" style="margin:16px 0">
+  <div style="color:var(--muted);font-size:13px;line-height:1.7">
+    · 메일함과 스팸함을 확인해 주세요.<br>
+    · 인증 링크는 30분간 유효하며 1회만 사용할 수 있습니다.<br>
+    · 메일이 오지 않으면 아래에서 재전송할 수 있습니다.
+  </div>
+</div>
+<button class="btn secondary" data-toast-msg="인증 메일을 다시 보냈습니다. (샘플)">인증 메일 재전송</button>
+<a class="btn" style="margin-top:10px" href="/login" data-once>인증 완료 후 로그인하기 (샘플)</a>
+<div class="auth-switch"><a class="btn ghost" href="/register">이메일 주소 다시 입력</a></div>
+{% endblock %}

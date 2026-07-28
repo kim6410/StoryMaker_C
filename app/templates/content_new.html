@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}새 콘텐츠 제작 - {{ app_name }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>새 콘텐츠 제작</h1>
+  <p>업체 정보와 요청사항만 입력하면 SNS 8채널 콘텐츠를 만들어 드립니다.</p>
+</div>
+
+<div class="steps">
+  <span class="step current">1. 정보 입력</span>
+  <span class="step">2. SNS 8채널</span>
+  <span class="step">3. 음성·자막·MP4</span>
+  <span class="step">4. 썸네일 선택</span>
+  <span class="step">5. 보관함 저장</span>
+</div>
+
+<div class="card company-form">
+  <div class="grid cols-2">
+    <div class="field"><label>업체 선택</label><select><option>오박사만능설비 (기본)</option><option>+ 새 업체 추가</option></select></div>
+    <div class="field"><label>제작 주제</label><input type="text" value="겨울철 보일러 점검 안내"></div>
+    <div class="field"><label>업종</label><select><option>보일러·설비</option><option>카페</option><option>미용·웰니스</option></select></div>
+    <div class="field"><label>지역</label><input type="text" value="서울 강북구"></div>
+    <div class="field"><label>핵심 키워드</label><input type="text" value="보일러 점검, 겨울철 난방"></div>
+    <div class="field"><label>고객 고민</label><input type="text" value="갑자기 보일러가 안 나와요"></div>
+  </div>
+  <div class="field"><label>자유 요청사항</label><textarea>친근한 말투로, 출장비 안내 문구를 꼭 넣어주세요.</textarea></div>
+
+  <div class="grid cols-2">
+    <div class="field">
+      <label>대표 이미지 선택 (복수)</label>
+      <div class="card" style="padding:12px;text-align:center;color:var(--muted);border-style:dashed">이미지를 여기로 드래그하거나 클릭해서 선택 (샘플)</div>
+    </div>
+    <div class="field">
+      <label>동영상 선택 (복수, 선택)</label>
+      <div class="card" style="padding:12px;text-align:center;color:var(--muted);border-style:dashed">동영상을 여기로 드래그하거나 클릭해서 선택 (샘플)</div>
+    </div>
+  </div>
+
+  <div class="tabs" data-tabs>
+    <button class="tab active" data-tab="browser">브라우저에서 생성</button>
+    <button class="tab" data-tab="api">서버 API로 생성</button>
+  </div>
+  <div data-tab-panel="browser" style="color:var(--muted);font-size:13px">브라우저 리소스를 사용해 무료로 생성합니다. 창을 닫지 않아야 합니다.</div>
+  <div data-tab-panel="api" style="display:none;color:var(--muted);font-size:13px">서버 API로 생성합니다. 창을 닫아도 진행됩니다.</div>
+
+  <a class="btn" style="margin-top:18px;width:auto;padding:0 24px" href="/content/channels?role={{ role_switch }}" data-once>AI 원고 생성 시작</a>
+</div>
+{% endblock %}

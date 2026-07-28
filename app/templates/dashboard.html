@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}대시보드 - {{ app_name }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>안녕하세요, {{ user.name }}님</h1>
+  <p>오늘도 빠르게 SNS 콘텐츠를 만들어 보세요.</p>
+</div>
+
+<div class="grid cols-4">
+  <div class="card stat"><div class="num">3</div><div class="label">이번 달 제작</div></div>
+  <div class="card stat"><div class="num">20</div><div class="label">무료 월 한도</div></div>
+  <div class="card stat"><div class="num">10</div><div class="label">보관함 최근 유지 개수</div></div>
+  <div class="card stat"><div class="num">17</div><div class="label">누적 제작완료</div></div>
+</div>
+
+<div class="card" style="margin-top:16px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+    <h3 style="margin:0">빠른 시작</h3>
+  </div>
+  <a class="btn" style="width:auto;padding:0 20px" href="/content/new?role={{ role_switch }}">+ 새 콘텐츠 제작 시작</a>
+</div>
+
+<div class="card" style="margin-top:16px">
+  <h3 style="margin:0 0 10px">최근 보관함</h3>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>제목</th><th>업체</th><th>제작일</th><th>상태</th><th></th></tr></thead>
+    <tbody>
+      {% for item in recent %}
+      <tr>
+        <td>{{ item.title }}</td>
+        <td>{{ item.company }}</td>
+        <td>{{ item.created_at }}</td>
+        <td><span class="badge ok">{{ item.status }}</span></td>
+        <td><a class="btn ghost" href="/archive/{{ item.id }}?role={{ role_switch }}">상세 보기</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endblock %}

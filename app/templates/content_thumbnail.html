@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}썸네일 선택 - {{ app_name }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>대표 썸네일 선택</h1>
+  <p>8개 후보 중 1개를 선택하면 대표 썸네일로 저장됩니다. 나머지 7개는 저장되지 않습니다.</p>
+</div>
+
+<div class="steps">
+  <span class="step done">1. 정보 입력</span>
+  <span class="step done">2. SNS 8채널</span>
+  <span class="step done">3. 음성·자막·MP4</span>
+  <span class="step current">4. 썸네일 선택</span>
+  <span class="step">5. 보관함 저장</span>
+</div>
+
+<div class="thumb-grid" data-thumb-grid>
+  {% for i in candidates %}
+  <div class="thumb {{ 'selected' if i == 3 else '' }}">
+    <span class="check">✓</span>
+    템플릿 {{ i }}
+  </div>
+  {% endfor %}
+</div>
+
+<button class="btn" style="margin-top:20px;width:auto;padding:0 24px" data-modal-open="#confirm-thumb-modal" data-thumb-confirm>이 썸네일로 저장</button>
+
+<div class="modal-backdrop" id="confirm-thumb-modal">
+  <div class="modal">
+    <h3>대표 썸네일로 저장할까요?</h3>
+    <p style="color:var(--muted);font-size:13px">선택한 템플릿 1개만 서버에 저장됩니다. 이후 다시 선택하면 기존 대표 썸네일이 교체됩니다.</p>
+    <div class="modal-actions">
+      <button class="btn secondary" data-modal-close>취소</button>
+      <a class="btn" href="/archive?role={{ role_switch }}" data-once>저장하고 보관함으로</a>
+    </div>
+  </div>
+</div>
+{% endblock %}

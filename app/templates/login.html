@@ -1,0 +1,20 @@
+{% extends "auth_base.html" %}
+{% block title %}로그인 - {{ app_name }}{% endblock %}
+{% block content %}
+<div class="auth-sub">사업자를 위한 SNS 콘텐츠 자동 제작 서비스</div>
+<div class="field">
+  <label>아이디 또는 이메일</label>
+  <input type="text" placeholder="example@company.com" value="kim@example.com" readonly>
+</div>
+<div class="field">
+  <label>비밀번호</label>
+  <input type="password" placeholder="비밀번호 입력" value="••••••••" readonly>
+</div>
+<div class="auth-links">
+  <label style="display:flex;align-items:center;gap:6px;color:var(--muted)"><input type="checkbox" checked disabled> 로그인 상태 유지</label>
+  <a class="btn ghost" href="/forgot-password">비밀번호 찾기</a>
+</div>
+<a class="btn" style="margin-top:16px" href="/dashboard?role=user" data-once>로그인 (샘플)</a>
+<a class="btn secondary" style="margin-top:10px" href="/dashboard?role=admin" data-once>관리자로 로그인 (샘플)</a>
+<div class="auth-switch">아직 계정이 없으신가요? <a class="btn ghost" href="/register">회원가입</a></div>
+{% endblock %}

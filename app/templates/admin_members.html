@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}관리자 - 회원관리 - {{ app_name }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>회원관리 <span class="badge admin">관리자 전용</span></h1>
+  <p>전체 회원의 플랜·사용량·활동을 확인합니다. 이 화면과 API는 서버에서 관리자 권한을 다시 검사합니다.</p>
+</div>
+
+<div class="card">
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>ID</th><th>이름</th><th>이메일</th><th>업체명</th><th>역할</th><th>플랜</th><th>구독기간</th><th>사용량</th><th>최근 로그인</th><th>상태</th><th></th></tr></thead>
+    <tbody>
+      {% for m in members %}
+      <tr>
+        <td>{{ m.id }}</td>
+        <td>{{ m.name }}</td>
+        <td>{{ m.email }}</td>
+        <td>{{ m.company }}</td>
+        <td>{% if m.role == 'admin' %}<span class="badge admin">관리자</span>{% else %}일반{% endif %}</td>
+        <td>{{ m.plan }}</td>
+        <td>{{ m.period }}</td>
+        <td>{{ m.usage }}</td>
+        <td>{{ m.last_login }}</td>
+        <td><span class="badge ok">{{ m.status }}</span></td>
+        <td><button class="btn ghost" data-toast-msg="회원 {{ m.id }}번 상세 (샘플)">상세</button></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endblock %}

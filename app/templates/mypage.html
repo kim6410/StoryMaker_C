@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}마이페이지 - {{ app_name }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>마이페이지</h1>
+  <p>콘텐츠 제작에 사용할 업체 정보를 관리합니다.</p>
+</div>
+
+<div class="tabs" data-tabs>
+  <button class="tab active" data-tab="profile">업체 정보</button>
+  <button class="tab" data-tab="account">계정</button>
+</div>
+
+<div data-tab-panel="profile" class="card company-form">
+  <div class="grid cols-2">
+    <div class="field"><label>업체명</label><input type="text" value="오박사만능설비"></div>
+    <div class="field"><label>대표자명</label><input type="text" value="김오박"></div>
+    <div class="field"><label>전화번호</label><input type="text" value="010-1234-5678"></div>
+    <div class="field"><label>업종</label><select><option>보일러·설비</option></select></div>
+    <div class="field"><label>지역</label><input type="text" value="서울 강북구"></div>
+    <div class="field"><label>주소</label><input type="text" value="서울시 강북구 ○○로 12"></div>
+  </div>
+  <div class="field"><label>주요 서비스</label><input type="text" value="보일러 수리, 배관 누수, 정기 점검"></div>
+  <div class="field"><label>핵심 강점 / 소개글</label><textarea>15년 경력, 당일 출장 가능, 정직한 견적</textarea></div>
+  <div class="field"><label>원하는 말투 / 금지 표현</label><input type="text" value="친근한 존댓말 / 과장 광고 표현 금지"></div>
+  <button class="btn" style="width:auto;padding:0 20px" data-toast-msg="업체 정보를 저장했습니다. (샘플)">저장</button>
+</div>
+
+<div data-tab-panel="account" class="card" style="display:none">
+  <h3 style="margin-top:0">로그인 비밀번호 변경</h3>
+  <div class="grid cols-2">
+    <div class="field"><label>현재 비밀번호</label><input type="password" placeholder="현재 비밀번호"></div>
+    <div class="field"><label>새 비밀번호</label><input type="password" placeholder="8자 이상"></div>
+  </div>
+  <button class="btn secondary" style="width:auto;padding:0 20px" data-toast-msg="비밀번호를 변경했습니다. 모든 기기에서 다시 로그인해야 합니다. (샘플)">비밀번호 변경</button>
+</div>
+{% endblock %}

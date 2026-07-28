@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>{% block title %}{{ app_name }}{% endblock %}</title>
+<link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+<div class="app-shell">
+  <header class="topbar">
+    <div class="topbar-left">
+      <button class="hamburger" data-hamburger aria-label="메뉴 열기">≡</button>
+      <a class="brand" href="/dashboard">StoryMaker <span style="color:var(--accent)">Claude Lab</span></a>
+    </div>
+    <div class="topbar-right">
+      <div class="role-switch" title="1단계 껍데기 데모 전용 - 실제 권한 분기 아님">
+        역할 데모:
+        <a href="?role=user" class="{{ 'active' if role_switch=='user' else '' }}">일반</a>
+        <a href="?role=admin" class="{{ 'active' if role_switch=='admin' else '' }}">관리자</a>
+      </div>
+      <div class="bell" data-toast-msg="새 알림이 없습니다. (샘플)">
+        🔔<span class="dot"></span>
+      </div>
+      <div class="user-chip">
+        <span class="only-desktop">{{ user.company if user.company != '-' else '관리자' }} ·</span>
+        <b>{{ user.name }}</b>
+      </div>
+      <a class="btn secondary" style="width:auto;height:36px;padding:0 14px" href="/login">로그아웃</a>
+    </div>
+  </header>
+
+  <nav class="sidebar" data-sidebar>
+    <div class="nav-group-title">메뉴</div>
+    {% for item in user_menu %}
+    <a class="nav-item {{ 'active' if active == item.key else '' }}" href="{{ item.href }}?role={{ role_switch }}">
+      <span class="nav-icon">•</span>{{ item.label }}
+    </a>
+    {% endfor %}
+    {% if admin_menu %}
+    <div class="nav-group-title">관리자</div>
+    {% for item in admin_menu %}
+    <a class="nav-item admin {{ 'active' if active == item.key else '' }}" href="{{ item.href }}?role={{ role_switch }}">
+      <span class="nav-icon">•</span>{{ item.label }}
+    </a>
+    {% endfor %}
+    {% endif %}
+  </nav>
+  <div class="overlay" data-overlay></div>
+
+  <main class="content">
+    {% block content %}{% endblock %}
+    <footer class="demo-note">
+      1단계 껍데기 화면입니다. 표시되는 모든 데이터는 샘플이며, 실제 AI·WordPress·DB 회원정보·음성·MP4 기능은 아직 연결되지 않았습니다. 상단 "역할 데모"로 일반/관리자 메뉴 차이를 확인할 수 있습니다.
+    </footer>
+  </main>
+</div>
+
+<div class="toast" data-toast></div>
+<script src="/static/js/app.js"></script>
+{% block scripts %}{% endblock %}
+</body>
+</html>
