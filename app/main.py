@@ -14,10 +14,23 @@ from fastapi.templating import Jinja2Templates
 from pathlib import Path
 from datetime import datetime, timezone
 
+from app.db.migrations import run_migrations
+from app.db.connection import integrity_check, current_journal_mode
+
 APP_ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = APP_ROOT.parent
 
-app = FastAPI(title="StoryMaker Claude Lab", version="0.1.0-shell")
+app = FastAPI(title="StoryMaker Claude Lab", version="0.2.0-db")
+
+
+@app.on_event("startup")
+def _startup_run_migrations() -> None:
+    """2단계: 앱 기동 시 DB 스키마 마이그레이션을 자동 적용한다."""
+    newly_applied = run_migrations()
+    if newly_applied:
+        print(f"[db] applied migrations: {newly_applied}")
+    else:
+        print("[db] schema already up to date")
 app.mount("/static", StaticFiles(directory=APP_ROOT / "static"), name="static")
 templates = Jinja2Templates(directory=APP_ROOT / "templates")
 
@@ -224,5 +237,11 @@ def admin_requests_page(request: Request, role: str = "admin"):
 
 @app.get("/healthz")
 def healthz():
-    """단계 15에서 정식 상태 API로 확장 예정. 지금은 최소 응답만 제공한다."""
-    return {"ok": True, "stage": "1-shell", "time": datetime.now(timezone.utc).isoformat()}
+    """단계 15에서 정식 상태 API로 확장 예정. 지금은 DB 상태까지만 포함한다."""
+    return {
+        "ok": True,
+        "stage": "2-db",
+        "time": datetime.now(timezone.utc).isoformat(),
+        "db_integrity": integrity_check(),
+        "db_journal_mode": current_journal_mode(),
+    }
