@@ -132,7 +132,14 @@ quotaId: GenerateContentInputTokensPerModelPerMinute-FreeTier, limit: 0
 
 ## 14. 커밋 / Push / 해시 일치
 
-(커밋 실행 후 별도로 기록)
+- 커밋: `298a07afc8193e5b41455de0700257e5f409f06d`
+- 스테이징: 명시적 경로만(`git add app/config.py app/constants.py app/db/migrations.py app/db/repository.py app/main.py app/templates/content_job_status.html app/ai app/integrations WORK_LOGS/...업무일지.md WORK_LOGS/...작업지시.md`), `git add .`/`-A` 미사용
+- Push: `git push origin main` 성공 (`5203bab..298a07a main -> main`)
+- 해시 일치 확인:
+  - 로컬 HEAD: `298a07afc8193e5b41455de0700257e5f409f06d`
+  - origin/main(추적 참조): `298a07afc8193e5b41455de0700257e5f409f06d`
+  - GitHub 실제(`git ls-remote origin refs/heads/main`): `298a07afc8193e5b41455de0700257e5f409f06d`
+  - 세 값 완전히 일치
 
 ## 15. 다음 단계
 
