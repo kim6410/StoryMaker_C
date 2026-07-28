@@ -14,7 +14,13 @@ from typing import Optional
 import numpy as np
 import soundfile as sf
 
-from app.config import JOBS_DIR, SUPERTONIC_DEFAULT_SPEED, SUPERTONIC_SENTENCE_GAP_SECONDS, to_relative_path
+from app.config import (
+    JOBS_DIR,
+    SUPERTONIC_DEFAULT_SPEED,
+    SUPERTONIC_SENTENCE_GAP_SECONDS,
+    to_absolute_path,
+    to_relative_path,
+)
 from app.constants import (
     PROJECT_STATUS_FAILED,
     PROJECT_STATUS_TTS_READY,
@@ -75,8 +81,7 @@ def _rebuild_master(project: dict, job_uid: str, voice_preference: str) -> bool:
         repo.upsert_tts_master(project_id, status="failed", error_code="incomplete_sentences")
         return False
 
-    from app.config import PROJECT_ROOT
-    wavs = [_read_wav_as_row(PROJECT_ROOT / r["relative_wav_path"]) for r in rows]
+    wavs = [_read_wav_as_row(to_absolute_path(r["relative_wav_path"])) for r in rows]
 
     sample_rate = adapter.get_sample_rate()
     full = adapter.concat_wavs(wavs, sample_rate, SUPERTONIC_SENTENCE_GAP_SECONDS)

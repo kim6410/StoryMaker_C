@@ -17,6 +17,8 @@ class ProbeResult:
     ok: bool
     duration_seconds: float = 0.0
     codec_name: str = ""
+    video_codec: str = ""
+    audio_codec: str = ""
     error_detail: str = ""
 
 
@@ -27,7 +29,7 @@ def probe_media(path: str) -> ProbeResult:
         return ProbeResult(ok=False, error_detail=f"ffprobe not found: {FFPROBE_PATH}")
     try:
         result = subprocess.run(
-            [str(FFPROBE_PATH), "-v", "error", "-show_entries", "format=duration:stream=codec_name",
+            [str(FFPROBE_PATH), "-v", "error", "-show_entries", "format=duration:stream=codec_name,codec_type",
              "-of", "json", path],
             capture_output=True, text=True, timeout=_PROBE_TIMEOUT_SECONDS,
         )
@@ -46,6 +48,9 @@ def probe_media(path: str) -> ProbeResult:
     duration = float((data.get("format") or {}).get("duration") or 0)
     streams = data.get("streams") or []
     codec = streams[0].get("codec_name", "") if streams else ""
+    video_codec = next((s.get("codec_name", "") for s in streams if s.get("codec_type") == "video"), "")
+    audio_codec = next((s.get("codec_name", "") for s in streams if s.get("codec_type") == "audio"), "")
     if duration <= 0:
         return ProbeResult(ok=False, error_detail=f"duration<=0 (codec={codec})")
-    return ProbeResult(ok=True, duration_seconds=round(duration, 3), codec_name=codec)
+    return ProbeResult(ok=True, duration_seconds=round(duration, 3), codec_name=codec,
+                        video_codec=video_codec, audio_codec=audio_codec)

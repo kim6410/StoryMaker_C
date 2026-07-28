@@ -17,6 +17,7 @@ from app.config import (
     MP4_HEIGHT,
     MP4_START_LEAD_SECONDS,
     MP4_WIDTH,
+    to_absolute_path,
     to_relative_path,
 )
 from app.constants import (
@@ -72,6 +73,11 @@ def generate_mp4_for_project(project: dict) -> Mp4Outcome:
         return Mp4Outcome(ok=True, duration_seconds=existing_mp4["duration_seconds"],
                            file_size_bytes=existing_mp4["file_size_bytes"])
 
+    if not repo.try_start_mp4_render(project_id):
+        # 동일 작업에서 로컬 렌더 업로드 등 다른 렌더가 이미 진행 중이면 중복 실행하지 않는다(31-10장).
+        return Mp4Outcome(ok=False, error_code="render_in_progress",
+                           error_message="이미 다른 렌더가 진행 중입니다. 잠시 후 다시 확인해 주세요.")
+
     master = repo.get_tts_master_for_project(project_id)
     srt = repo.get_srt_for_project(project_id)
     sentence_rows = repo.list_tts_sentences_for_project(project_id)
@@ -81,8 +87,7 @@ def generate_mp4_for_project(project: dict) -> Mp4Outcome:
 
     repo.update_project_status(project_id, PROJECT_STATUS_RENDERING)
 
-    from app.config import PROJECT_ROOT
-    srt_path = PROJECT_ROOT / srt["relative_srt_path"]
+    srt_path = to_absolute_path(srt["relative_srt_path"])
     scenes = build_scene_plan(srt_path, master["total_duration_seconds"], sentence_rows)
 
     repo.replace_scenes(project_id, [
@@ -128,7 +133,7 @@ def generate_mp4_for_project(project: dict) -> Mp4Outcome:
                            error_message=USER_MP4_ERROR_MESSAGES[MP4_ERR_CONCAT_FAILED])
 
     total_duration = sum(s.duration_seconds for s in scenes)
-    tts_master_path = PROJECT_ROOT / master["relative_wav_path"]
+    tts_master_path = to_absolute_path(master["relative_wav_path"])
 
     music_path: Optional[Path] = None
     music_relative = project.get("music_relative_path") or ""
@@ -178,7 +183,108 @@ def generate_mp4_for_project(project: dict) -> Mp4Outcome:
     repo.upsert_mp4_result(
         project_id, status="success", relative_mp4_path=to_relative_path(final_mp4_path),
         width=MP4_WIDTH, height=MP4_HEIGHT, fps=MP4_FPS, video_codec="h264", audio_codec="aac",
-        duration_seconds=probe.duration_seconds, file_size_bytes=file_size,
+        duration_seconds=probe.duration_seconds, file_size_bytes=file_size, render_method="server",
     )
     repo.update_project_status(project_id, PROJECT_STATUS_COMPLETED)
     return Mp4Outcome(ok=True, duration_seconds=probe.duration_seconds, file_size_bytes=file_size)
+
+
+def build_render_manifest(project: dict) -> Optional[dict]:
+    """단계9: 로컬(브라우저) 렌더가 사용할 검증된 작업 명세. 서버가 이미 계산한 장면·오디오만
+    내려주고, 브라우저가 임의 경로에 접근하지 못하도록 이 작업 소유의 파일 URL만 포함한다."""
+    project_id = project["id"]
+    job_uid = project["job_uid"]
+    master = repo.get_tts_master_for_project(project_id)
+    srt = repo.get_srt_for_project(project_id)
+    if not master or master["status"] != "success" or not srt or srt["status"] != "success":
+        return None
+
+    scenes = repo.list_scenes_for_project(project_id)
+    if not scenes:
+        srt_path = to_absolute_path(srt["relative_srt_path"])
+        sentence_rows = repo.list_tts_sentences_for_project(project_id)
+        scenes_spec = build_scene_plan(srt_path, master["total_duration_seconds"], sentence_rows)
+        repo.replace_scenes(project_id, [
+            {
+                "scene_index": s.scene_index, "sentence_index": s.sentence_index,
+                "start_seconds": s.start_seconds, "duration_seconds": s.duration_seconds,
+                "zoom_type": s.zoom_type, "zoom_start": s.zoom_start, "zoom_end": s.zoom_end,
+                "transition_in_seconds": s.transition_in_seconds, "color0": s.color0, "color1": s.color1,
+            }
+            for s in scenes_spec
+        ])
+        scenes = repo.list_scenes_for_project(project_id)
+
+    snapshot = json.loads(project.get("input_snapshot_json") or "{}")
+    total_duration = sum(s["duration_seconds"] for s in scenes)
+
+    music_relative = project.get("music_relative_path") or ""
+    music_url = f"/content/music-preview/{Path(music_relative).name}" if music_relative else None
+
+    return {
+        "job_uid": job_uid,
+        "width": MP4_WIDTH, "height": MP4_HEIGHT, "fps": MP4_FPS,
+        "start_lead_seconds": MP4_START_LEAD_SECONDS, "end_hold_seconds": MP4_END_HOLD_SECONDS,
+        "total_duration_seconds": total_duration,
+        "company_name": snapshot.get("company_name", ""), "phone_number": snapshot.get("phone_number", ""),
+        "tts_audio_url": f"/content/job/{job_uid}/tts/audio/full.wav",
+        "music_url": music_url,
+        "scenes": [
+            {
+                "scene_index": s["scene_index"], "start_seconds": s["start_seconds"],
+                "duration_seconds": s["duration_seconds"], "zoom_type": s["zoom_type"],
+                "zoom_start": s["zoom_start"], "zoom_end": s["zoom_end"],
+                "transition_in_seconds": s["transition_in_seconds"],
+                "color0": s["color0"], "color1": s["color1"],
+            }
+            for s in scenes
+        ],
+    }
+
+
+def accept_local_render_upload(project: dict, uploaded_path: Path) -> Mp4Outcome:
+    """브라우저(WebGPU/WASM/WebCodecs)가 만든 MP4를 서버가 최종 검증 없이 그대로 완료 처리하지
+    않는다(작업지시 31-14장). 서버 렌더와 동일한 코덱·해상도·길이 검증을 통과해야 저장한다."""
+    project_id = project["id"]
+    job_uid = project["job_uid"]
+
+    master = repo.get_tts_master_for_project(project_id)
+    srt = repo.get_srt_for_project(project_id)
+    if not master or master["status"] != "success" or not srt or srt["status"] != "success":
+        return Mp4Outcome(ok=False, error_code=MP4_ERR_NO_TTS, error_message=USER_MP4_ERROR_MESSAGES[MP4_ERR_NO_TTS])
+
+    if not repo.try_start_mp4_render(project_id):
+        return Mp4Outcome(ok=False, error_code="render_in_progress",
+                           error_message="이미 다른 렌더가 진행 중입니다. 잠시 후 다시 확인해 주세요.")
+
+    scenes = repo.list_scenes_for_project(project_id)
+    expected_total = sum(s["duration_seconds"] for s in scenes) if scenes else (
+        MP4_START_LEAD_SECONDS + master["total_duration_seconds"] + MP4_END_HOLD_SECONDS
+    )
+
+    probe = probe_media(str(uploaded_path))
+    file_size = uploaded_path.stat().st_size if uploaded_path.is_file() else 0
+    duration_ok = probe.ok and abs(probe.duration_seconds - expected_total) <= 1.5
+    codec_ok = probe.video_codec in ("h264", "avc1") and bool(probe.audio_codec)
+    if not probe.ok or not codec_ok or file_size <= 0 or not duration_ok:
+        repo.upsert_mp4_result(project_id, status="failed", error_code=MP4_ERR_VERIFY_FAILED,
+                                render_method="local")
+        repo.update_project_status(project_id, PROJECT_STATUS_FAILED, error_code=MP4_ERR_VERIFY_FAILED)
+        uploaded_path.unlink(missing_ok=True)
+        return Mp4Outcome(ok=False, error_code=MP4_ERR_VERIFY_FAILED,
+                           error_message=USER_MP4_ERROR_MESSAGES[MP4_ERR_VERIFY_FAILED])
+
+    final_mp4_path = _media_dir(job_uid) / "final.mp4"
+    final_mp4_path.parent.mkdir(parents=True, exist_ok=True)
+    uploaded_path.replace(final_mp4_path)
+
+    repo.upsert_mp4_result(
+        project_id, status="success", relative_mp4_path=to_relative_path(final_mp4_path),
+        width=MP4_WIDTH, height=MP4_HEIGHT, fps=MP4_FPS, video_codec=probe.video_codec,
+        audio_codec=probe.audio_codec,
+        duration_seconds=probe.duration_seconds, file_size_bytes=final_mp4_path.stat().st_size,
+        render_method="local",
+    )
+    repo.update_project_status(project_id, PROJECT_STATUS_COMPLETED)
+    return Mp4Outcome(ok=True, duration_seconds=probe.duration_seconds,
+                       file_size_bytes=final_mp4_path.stat().st_size)

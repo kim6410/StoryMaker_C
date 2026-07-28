@@ -8,7 +8,7 @@ StoryMaker Claude Lab - 3단계: 회원가입/로그인/세션을 자체 DB로 �
 from __future__ import annotations
 
 import os
-from fastapi import FastAPI, Request, Form
+from fastapi import FastAPI, Request, Form, UploadFile, File
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -485,7 +485,6 @@ def content_job_tts_page(request: Request, job_uid: str):
 def content_job_tts_audio(request: Request, job_uid: str, filename: str):
     """문장별/전체 합성 WAV 스트리밍. 소유자만 접근 가능하고 파일명은 이 작업의 tts 폴더로만 해석한다."""
     from fastapi import HTTPException
-    from fastapi.responses import FileResponse
     user = _require_login_or_redirect(request)
     if not user:
         return RedirectResponse(url="/login")
@@ -494,11 +493,12 @@ def content_job_tts_audio(request: Request, job_uid: str, filename: str):
         return RedirectResponse(url="/content/new")
 
     from app.config import JOBS_DIR
+    from app.media.range_response import range_file_response
     safe_name = Path(filename).name
     path = JOBS_DIR / job_uid / "tts" / safe_name
     if not path.is_file():
         raise HTTPException(status_code=404, detail="음성 파일을 찾을 수 없습니다.")
-    return FileResponse(path, media_type="audio/wav")
+    return range_file_response(request, path, "audio/wav")
 
 
 @app.get("/content/job/{job_uid}/subtitle/download")
@@ -513,11 +513,14 @@ def content_job_subtitle_download(request: Request, job_uid: str):
         return RedirectResponse(url="/content/new")
 
     from app.db import repository as repo
-    from app.config import PROJECT_ROOT
+    from app.config import PathEscapeError, to_absolute_path
     srt = repo.get_srt_for_project(project["id"])
     if not srt or srt["status"] != "success":
         raise HTTPException(status_code=404, detail="SRT가 아직 없습니다.")
-    path = PROJECT_ROOT / srt["relative_srt_path"]
+    try:
+        path = to_absolute_path(srt["relative_srt_path"])
+    except PathEscapeError:
+        raise HTTPException(status_code=404, detail="SRT 파일을 찾을 수 없습니다.")
     if not path.is_file():
         raise HTTPException(status_code=404, detail="SRT 파일을 찾을 수 없습니다.")
     return FileResponse(path, media_type="application/x-subrip", filename="subtitle.srt")
@@ -576,7 +579,6 @@ def content_job_mp4_page(request: Request, job_uid: str, mp4_error: str = ""):
 @app.get("/content/job/{job_uid}/mp4/video")
 def content_job_mp4_video(request: Request, job_uid: str):
     from fastapi import HTTPException
-    from fastapi.responses import FileResponse
     user = _require_login_or_redirect(request)
     if not user:
         return RedirectResponse(url="/login")
@@ -585,14 +587,102 @@ def content_job_mp4_video(request: Request, job_uid: str):
         return RedirectResponse(url="/content/new")
 
     from app.db import repository as repo
-    from app.config import PROJECT_ROOT
+    from app.config import PathEscapeError, to_absolute_path
+    from app.media.range_response import range_file_response
     mp4 = repo.get_mp4_for_project(project["id"])
     if not mp4 or mp4["status"] != "success":
         raise HTTPException(status_code=404, detail="MP4가 아직 없습니다.")
-    path = PROJECT_ROOT / mp4["relative_mp4_path"]
+    try:
+        path = to_absolute_path(mp4["relative_mp4_path"])
+    except PathEscapeError:
+        raise HTTPException(status_code=404, detail="MP4 파일을 찾을 수 없습니다.")
     if not path.is_file():
         raise HTTPException(status_code=404, detail="MP4 파일을 찾을 수 없습니다.")
-    return FileResponse(path, media_type="video/mp4", filename="content.mp4")
+    return range_file_response(request, path, "video/mp4", filename="content.mp4")
+
+
+@app.get("/content/job/{job_uid}/render-manifest.json")
+def content_job_render_manifest(request: Request, job_uid: str):
+    """단계9: 브라우저 로컬 렌더가 사용할 검증된 작업 명세. 소유자만 접근 가능하다."""
+    from fastapi import HTTPException
+    from fastapi.responses import JSONResponse
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    project = _get_owned_project_or_none(job_uid, user)
+    if not project:
+        return RedirectResponse(url="/content/new")
+
+    from app.media.service import build_render_manifest
+    manifest = build_render_manifest(project)
+    if not manifest:
+        raise HTTPException(status_code=409, detail="TTS·SRT가 아직 준비되지 않았습니다.")
+    return JSONResponse(manifest)
+
+
+@app.post("/content/job/{job_uid}/mp4/upload-local")
+async def content_job_mp4_upload_local(request: Request, job_uid: str, file: UploadFile = File(...)):
+    """단계9: 브라우저(WebGPU/WASM/WebCodecs)가 만든 MP4를 업로드받아 서버가 재검증 후 저장한다."""
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    project = _get_owned_project_or_none(job_uid, user)
+    if not project:
+        return RedirectResponse(url="/content/new")
+
+    from app.config import JOBS_DIR
+    from app.media.service import accept_local_render_upload
+    from app.db import repository as repo
+
+    upload_dir = JOBS_DIR / job_uid / "media"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    tmp_path = upload_dir / "upload_local_tmp.mp4"
+    max_bytes = 200 * 1024 * 1024
+    written = 0
+    with open(tmp_path, "wb") as f:
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            written += len(chunk)
+            if written > max_bytes:
+                f.close()
+                tmp_path.unlink(missing_ok=True)
+                return {"ok": False, "error_code": "file_too_large"}
+            f.write(chunk)
+
+    outcome = accept_local_render_upload(project, tmp_path)
+    repo.write_audit_log(
+        user["id"], "mp4_local_upload", target_type="project", target_id=project["id"],
+        metadata_json=f'{{"ok": {str(outcome.ok).lower()}, "error_code": "{outcome.error_code}"}}',
+    )
+    return {"ok": outcome.ok, "error_code": outcome.error_code, "error_message": outcome.error_message,
+            "duration_seconds": outcome.duration_seconds, "file_size_bytes": outcome.file_size_bytes}
+
+
+@app.post("/content/job/{job_uid}/mp4/render-diagnostics")
+async def content_job_mp4_render_diagnostics(request: Request, job_uid: str):
+    """단계9: 로컬 가속 진단 정보(관리자 분석용)만 저장한다. 개인정보·과도한 장치 지문은 남기지 않는다."""
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    project = _get_owned_project_or_none(job_uid, user)
+    if not project:
+        return RedirectResponse(url="/content/new")
+
+    body = await request.json()
+    from app.db import repository as repo
+    repo.save_render_diagnostics(project["id"], user["id"], {
+        "render_method": str(body.get("render_method", ""))[:20],
+        "webgpu_ready": bool(body.get("webgpu_ready")),
+        "webcodecs_ready": bool(body.get("webcodecs_ready")),
+        "memory_mb": body.get("memory_mb"),
+        "outcome": str(body.get("outcome", ""))[:20],
+        "fallback_reason": str(body.get("fallback_reason", ""))[:100],
+        "total_ms": int(body.get("total_ms") or 0),
+        "user_agent": str(body.get("user_agent", "")),
+    })
+    return {"ok": True}
 
 
 @app.get("/content/channels")
@@ -722,18 +812,18 @@ def admin_requests_page(request: Request):
 @app.get("/content/music-preview/{filename}")
 def music_preview(request: Request, filename: str):
     """배경음악 미리듣기. runtime/music/mp3 원본을 그대로 스트리밍한다(복사 없음)."""
-    from fastapi.responses import FileResponse
     user = _require_login_or_redirect(request)
     if not user:
         return RedirectResponse(url="/login")
     from app.content.music import resolve_music_path
+    from app.media.range_response import range_file_response
     # 파일명만 받아 MUSIC_LIBRARY_DIR 안에서만 해석하므로 경로 이탈이 불가능하다.
     safe_name = Path(filename).name
     path = resolve_music_path(f"runtime/music/mp3/{safe_name}")
     if not path:
         from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="음악 파일을 찾을 수 없습니다.")
-    return FileResponse(path, media_type="audio/mpeg")
+    return range_file_response(request, path, "audio/mpeg")
 
 
 @app.get("/healthz")

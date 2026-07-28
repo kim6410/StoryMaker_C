@@ -73,6 +73,16 @@ def to_relative_path(absolute_path: Path | str) -> str:
     return str(p.relative_to(PROJECT_ROOT)).replace("\\", "/")
 
 
+class PathEscapeError(ValueError):
+    """DB나 요청에서 온 상대경로가 '..' 등으로 PROJECT_ROOT 밖을 가리킬 때 발생시킨다."""
+
+
 def to_absolute_path(relative_path: str) -> Path:
-    """DB에서 읽은 상대경로를 실제 파일 접근용 절대경로로 복원한다."""
-    return (PROJECT_ROOT / relative_path).resolve()
+    """DB에서 읽은 상대경로를 실제 파일 접근용 절대경로로 복원한다.
+    '..'나 절대경로가 섞여 PROJECT_ROOT 밖을 가리키면 즉시 차단한다(경로 이탈 방지)."""
+    candidate = (PROJECT_ROOT / relative_path).resolve()
+    try:
+        candidate.relative_to(PROJECT_ROOT)
+    except ValueError:
+        raise PathEscapeError(f"path escapes PROJECT_ROOT: {relative_path!r} -> {candidate}") from None
+    return candidate

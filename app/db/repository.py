@@ -995,7 +995,8 @@ def get_music_mix_for_project(project_id: int) -> Optional[dict]:
 
 def upsert_mp4_result(project_id: int, status: str, relative_mp4_path: str = "", width: int = 0,
                        height: int = 0, fps: float = 0.0, video_codec: str = "", audio_codec: str = "",
-                       duration_seconds: float = 0.0, file_size_bytes: int = 0, error_code: str = "") -> None:
+                       duration_seconds: float = 0.0, file_size_bytes: int = 0, error_code: str = "",
+                       render_method: str = "server", fallback_reason: str = "") -> None:
     now = _now()
     with get_connection() as conn:
         existing = conn.execute("SELECT id FROM content_mp4 WHERE project_id=?", (project_id,)).fetchone()
@@ -1004,22 +1005,26 @@ def upsert_mp4_result(project_id: int, status: str, relative_mp4_path: str = "",
                 """
                 UPDATE content_mp4 SET
                     status=?, relative_mp4_path=?, width=?, height=?, fps=?, video_codec=?, audio_codec=?,
-                    duration_seconds=?, file_size_bytes=?, error_code=?, updated_at=?
+                    duration_seconds=?, file_size_bytes=?, error_code=?, render_method=?, fallback_reason=?,
+                    updated_at=?
                 WHERE id=?
                 """,
                 (status, relative_mp4_path, width, height, fps, video_codec, audio_codec,
-                 duration_seconds, file_size_bytes, error_code, now, existing["id"]),
+                 duration_seconds, file_size_bytes, error_code, render_method, fallback_reason,
+                 now, existing["id"]),
             )
         else:
             conn.execute(
                 """
                 INSERT INTO content_mp4
                     (project_id, relative_mp4_path, width, height, fps, video_codec, audio_codec,
-                     duration_seconds, file_size_bytes, status, error_code, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                     duration_seconds, file_size_bytes, status, error_code, render_method, fallback_reason,
+                     created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (project_id, relative_mp4_path, width, height, fps, video_codec, audio_codec,
-                 duration_seconds, file_size_bytes, status, error_code, now, now),
+                 duration_seconds, file_size_bytes, status, error_code, render_method, fallback_reason,
+                 now, now),
             )
 
 
@@ -1027,3 +1032,43 @@ def get_mp4_for_project(project_id: int) -> Optional[dict]:
     with get_readonly_connection() as conn:
         row = conn.execute("SELECT * FROM content_mp4 WHERE project_id=?", (project_id,)).fetchone()
         return dict(row) if row else None
+
+
+def try_start_mp4_render(project_id: int) -> bool:
+    """작업 ID별 렌더 잠금. 이미 status='rendering'이면 획득 실패(중복 렌더 방지, 작업지시 31-10장).
+    성공하면 즉시 status='rendering'으로 표시해 잠근다."""
+    now = _now()
+    with get_connection() as conn:
+        existing = conn.execute("SELECT status FROM content_mp4 WHERE project_id=?", (project_id,)).fetchone()
+        if existing and existing["status"] == "rendering":
+            return False
+        if existing:
+            conn.execute(
+                "UPDATE content_mp4 SET status='rendering', error_code='', updated_at=? WHERE project_id=?",
+                (now, project_id),
+            )
+        else:
+            conn.execute(
+                "INSERT INTO content_mp4 (project_id, status, created_at, updated_at) VALUES (?, 'rendering', ?, ?)",
+                (project_id, now, now),
+            )
+        return True
+
+
+def save_render_diagnostics(project_id: int, user_id: int, fields: dict) -> int:
+    with get_connection() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO content_render_diagnostics
+                (project_id, user_id, render_method, webgpu_ready, webcodecs_ready, memory_mb,
+                 outcome, fallback_reason, total_ms, user_agent, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                project_id, user_id, fields.get("render_method", ""),
+                1 if fields.get("webgpu_ready") else 0, 1 if fields.get("webcodecs_ready") else 0,
+                fields.get("memory_mb"), fields.get("outcome", ""), fields.get("fallback_reason", ""),
+                fields.get("total_ms", 0), (fields.get("user_agent", "") or "")[:300], _now(),
+            ),
+        )
+        return int(cur.lastrowid)

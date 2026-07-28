@@ -414,6 +414,33 @@ def _migration_009_mp4_render(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_010_local_render(conn: sqlite3.Connection) -> None:
+    """단계9: 로컬(WebGPU/WASM/WebCodecs) 렌더와 서버 렌더가 같은 결과 계약을 쓰도록
+    content_mp4에 렌더 방식을 추가하고, 브라우저 기능 진단 로그를 별도로 남긴다."""
+    conn.executescript(
+        """
+        ALTER TABLE content_mp4 ADD COLUMN render_method TEXT NOT NULL DEFAULT 'server';
+        ALTER TABLE content_mp4 ADD COLUMN fallback_reason TEXT NOT NULL DEFAULT '';
+
+        CREATE TABLE content_render_diagnostics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            render_method TEXT NOT NULL DEFAULT '',
+            webgpu_ready INTEGER NOT NULL DEFAULT 0,
+            webcodecs_ready INTEGER NOT NULL DEFAULT 0,
+            memory_mb INTEGER,
+            outcome TEXT NOT NULL DEFAULT '',
+            fallback_reason TEXT NOT NULL DEFAULT '',
+            total_ms INTEGER NOT NULL DEFAULT 0,
+            user_agent TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX idx_render_diagnostics_project ON content_render_diagnostics(project_id);
+        """
+    )
+
+
 # 순서대로 등록. 이미 적용된 번호는 다시 실행하지 않는다.
 MIGRATIONS: list[Migration] = [
     (1, "initial_schema", _migration_001_initial_schema),
@@ -425,6 +452,7 @@ MIGRATIONS: list[Migration] = [
     (7, "channel_results", _migration_007_channel_results),
     (8, "tts_subtitle", _migration_008_tts_subtitle),
     (9, "mp4_render", _migration_009_mp4_render),
+    (10, "local_render", _migration_010_local_render),
 ]
 
 
