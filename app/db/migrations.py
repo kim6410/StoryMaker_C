@@ -177,11 +177,26 @@ def _migration_003_companies(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_004_project_content_fields(conn: sqlite3.Connection) -> None:
+    """5단계: 제작 요청 당시 업체 정보 스냅샷과 선택 항목을 projects에 추가한다.
+    스냅샷을 별도 테이블로 분리하지 않고 기존 projects에 얹는 이유는, 이미 있는
+    작업(job) 개념을 중복해서 만들지 않기 위해서다(가벼운 스키마 유지)."""
+    conn.executescript(
+        """
+        ALTER TABLE projects ADD COLUMN company_id INTEGER REFERENCES companies(id);
+        ALTER TABLE projects ADD COLUMN input_snapshot_json TEXT NOT NULL DEFAULT '{}';
+        ALTER TABLE projects ADD COLUMN music_relative_path TEXT NOT NULL DEFAULT '';
+        ALTER TABLE projects ADD COLUMN voice_preference TEXT NOT NULL DEFAULT '';
+        """
+    )
+
+
 # 순서대로 등록. 이미 적용된 번호는 다시 실행하지 않는다.
 MIGRATIONS: list[Migration] = [
     (1, "initial_schema", _migration_001_initial_schema),
     (2, "auth_tables", _migration_002_auth_tables),
     (3, "companies", _migration_003_companies),
+    (4, "project_content_fields", _migration_004_project_content_fields),
 ]
 
 

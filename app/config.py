@@ -20,6 +20,10 @@ MEDIA_DIR = DATA_DIR / "media"
 LOGS_DIR = PROJECT_ROOT / "logs"
 BACKUPS_DIR = PROJECT_ROOT / "backups"
 
+# 공용 배경음악 라이브러리. 용량을 줄이기 위해 data/ 안으로 복사하지 않고
+# runtime/music/mp3를 읽기 전용으로 그대로 참조한다.
+MUSIC_LIBRARY_DIR = PROJECT_ROOT / "runtime" / "music" / "mp3"
+
 DB_PATH = DATA_DIR / "storymaker_claude.db"
 
 for _d in (DATA_DIR, JOBS_DIR, MEDIA_DIR, LOGS_DIR, BACKUPS_DIR):

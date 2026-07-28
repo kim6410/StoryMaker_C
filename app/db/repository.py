@@ -145,6 +145,32 @@ def create_project(user_id: int, title: str) -> dict:
         return {"id": int(cur.lastrowid), "job_uid": job_uid}
 
 
+def create_content_project(user_id: int, title: str, company_id: Optional[int],
+                            input_snapshot_json: str, music_relative_path: str = "",
+                            voice_preference: str = "") -> dict:
+    """5단계: 제작 요청 당시 업체 정보 스냅샷을 포함해 작업을 생성한다."""
+    now = _now()
+    job_uid = f"proj_{now[:10].replace('-', '')}_{secrets.token_hex(4)}"
+    with get_connection() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO projects
+                (job_uid, user_id, title, status, error_code, progress, company_id,
+                 input_snapshot_json, music_relative_path, voice_preference, created_at, updated_at)
+            VALUES (?, ?, ?, ?, '', 0, ?, ?, ?, ?, ?, ?)
+            """,
+            (job_uid, user_id, title, PROJECT_STATUS_DRAFT, company_id,
+             input_snapshot_json, music_relative_path, voice_preference, now, now),
+        )
+        return {"id": int(cur.lastrowid), "job_uid": job_uid}
+
+
+def get_project_by_uid(job_uid: str) -> Optional[dict]:
+    with get_readonly_connection() as conn:
+        row = conn.execute("SELECT * FROM projects WHERE job_uid=?", (job_uid,)).fetchone()
+        return dict(row) if row else None
+
+
 def get_project(project_id: int) -> Optional[dict]:
     with get_readonly_connection() as conn:
         row = conn.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()

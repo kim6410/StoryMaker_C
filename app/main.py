@@ -7,6 +7,7 @@ StoryMaker Claude Lab - 3단계: 회원가입/로그인/세션을 자체 DB로 �
 """
 from __future__ import annotations
 
+import os
 from fastapi import FastAPI, Request, Form
 from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -172,11 +173,94 @@ def dashboard_page(request: Request):
 
 
 @app.get("/content/new")
-def content_new_page(request: Request):
+def content_new_page(request: Request, error: str = ""):
     user = _require_login_or_redirect(request)
     if not user:
         return RedirectResponse(url="/login")
-    return templates.TemplateResponse("content_new.html", _ctx(request, user, active="content_new"))
+    from app.db import repository as repo
+    from app.content.music import list_music_files
+    company = repo.get_default_company_for_user(user["id"])
+    music_items = list_music_files()
+    return templates.TemplateResponse("content_new.html", _ctx(
+        request, user, active="content_new", company=company, music_items=music_items, error=error,
+    ))
+
+
+@app.post("/content/new")
+def create_content_job(
+    request: Request,
+    topic: str = Form(...),
+    keywords: str = Form(""),
+    tone_preference: str = Form(""),
+    content_length: str = Form("medium"),
+    music_relative_path: str = Form(""),
+    voice_preference: str = Form("female"),
+    company_name: str = Form(""),
+    owner_name: str = Form(""),
+    phone_number: str = Form(""),
+    industry: str = Form(""),
+    region: str = Form(""),
+    main_services: str = Form(""),
+    target_customers: str = Form(""),
+):
+    import json
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    if not topic.strip():
+        return RedirectResponse(url="/content/new?error=제작+주제를+입력해+주세요.", status_code=303)
+
+    from app.db import repository as repo
+    from app.content.music import resolve_music_path
+
+    company = repo.get_default_company_for_user(user["id"])
+    if music_relative_path and not resolve_music_path(music_relative_path):
+        music_relative_path = ""
+
+    # 마이페이지 업체 정보와 별개로, 이번 제작 요청 당시 값을 스냅샷으로 고정한다.
+    # (나중에 마이페이지 업체 정보가 바뀌어도 이 작업의 과거 결과는 변하지 않는다.)
+    snapshot = {
+        "company_name": company_name.strip() or (company["company_name"] if company else ""),
+        "owner_name": owner_name.strip() or (company["owner_name"] if company else ""),
+        "phone_number": phone_number.strip() or (company["phone_number"] if company else ""),
+        "industry": industry.strip() or (company["industry"] if company else ""),
+        "region": region.strip() or (company["region"] if company else ""),
+        "main_services": main_services.strip() or (company["main_services"] if company else ""),
+        "target_customers": target_customers.strip() or (company["target_customers"] if company else ""),
+        "topic": topic.strip(),
+        "keywords": keywords.strip(),
+        "tone_preference": tone_preference.strip(),
+        "content_length": content_length.strip() or "medium",
+    }
+    project = repo.create_content_project(
+        user_id=user["id"],
+        title=topic.strip(),
+        company_id=(company["id"] if company else None),
+        input_snapshot_json=json.dumps(snapshot, ensure_ascii=False),
+        music_relative_path=music_relative_path,
+        voice_preference=voice_preference.strip() or "female",
+    )
+    repo.write_audit_log(user["id"], "content_job_created", target_type="project", target_id=project["id"])
+    return RedirectResponse(url=f"/content/job/{project['job_uid']}", status_code=303)
+
+
+@app.get("/content/job/{job_uid}")
+def content_job_status(request: Request, job_uid: str):
+    import json
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    from app.db import repository as repo
+    project = repo.get_project_by_uid(job_uid)
+    if not project or project["user_id"] != user["id"]:
+        if not (project and str(user.get("role")) == "admin"):
+            return RedirectResponse(url="/content/new")
+    snapshot = json.loads(project["input_snapshot_json"] or "{}")
+    gemini_configured = bool((os.getenv("GEMINI_API_KEY") or "").strip())
+    return templates.TemplateResponse("content_job_status.html", _ctx(
+        request, user, active="content_new", project=project, snapshot=snapshot,
+        gemini_configured=gemini_configured,
+    ))
 
 
 @app.get("/content/channels")
@@ -301,6 +385,23 @@ def admin_requests_page(request: Request):
     if str(user.get("role")) != "admin":
         return RedirectResponse(url="/dashboard")
     return templates.TemplateResponse("admin_requests.html", _ctx(request, user, active="admin_requests", requests=SAMPLE_REQUESTS))
+
+
+@app.get("/content/music-preview/{filename}")
+def music_preview(request: Request, filename: str):
+    """배경음악 미리듣기. runtime/music/mp3 원본을 그대로 스트리밍한다(복사 없음)."""
+    from fastapi.responses import FileResponse
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    from app.content.music import resolve_music_path
+    # 파일명만 받아 MUSIC_LIBRARY_DIR 안에서만 해석하므로 경로 이탈이 불가능하다.
+    safe_name = Path(filename).name
+    path = resolve_music_path(f"runtime/music/mp3/{safe_name}")
+    if not path:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="음악 파일을 찾을 수 없습니다.")
+    return FileResponse(path, media_type="audio/mpeg")
 
 
 @app.get("/healthz")

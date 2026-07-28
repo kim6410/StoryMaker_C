@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}제작 작업 상태 - {{ app_name }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>{{ project.title }}</h1>
+  <p>작업 번호: {{ project.job_uid }} · 생성일: {{ project.created_at[:16] }}</p>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0">현재 상태</h3>
+  <span class="badge {{ 'warn' if project.status in ['draft','queued'] else 'ok' }}">{{ project.status }}</span>
+
+  {% if not gemini_configured %}
+  <div class="card" style="border-color:var(--warn);margin-top:14px">
+    <b style="color:var(--warn);font-size:12px">AI 콘텐츠 생성 대기 중</b>
+    <p style="color:var(--muted);font-size:12px;margin:6px 0">
+      이 작업은 정상적으로 저장됐지만, Gemini API 키가 아직 설정되지 않아 SNS 8채널 콘텐츠 자동 생성 단계로 진행할 수 없습니다.
+      <code>config/.env</code>의 <code>GEMINI_API_KEY</code>를 채운 뒤 다시 시도해 주세요.
+    </p>
+  </div>
+  {% else %}
+  <div class="card" style="margin-top:14px;color:var(--muted);font-size:13px">
+    AI 콘텐츠 생성 기능은 다음 업데이트에서 이 화면에 연결될 예정입니다.
+  </div>
+  {% endif %}
+</div>
+
+<div class="card" style="margin-top:14px">
+  <h3 style="margin-top:0">제작 요청 스냅샷 (마이페이지 업체 정보와 별개로 이 작업에 고정됨)</h3>
+  <table>
+    <tbody>
+      <tr><td>업체명</td><td>{{ snapshot.company_name }}</td></tr>
+      <tr><td>담당자</td><td>{{ snapshot.owner_name }}</td></tr>
+      <tr><td>전화번호</td><td>{{ snapshot.phone_number }}</td></tr>
+      <tr><td>업종</td><td>{{ snapshot.industry }}</td></tr>
+      <tr><td>지역</td><td>{{ snapshot.region }}</td></tr>
+      <tr><td>주제</td><td>{{ snapshot.topic }}</td></tr>
+      <tr><td>키워드</td><td>{{ snapshot.keywords or '-' }}</td></tr>
+      <tr><td>말투</td><td>{{ snapshot.tone_preference }}</td></tr>
+      <tr><td>길이</td><td>{{ snapshot.content_length }}</td></tr>
+      <tr><td>음성</td><td>{{ '여성' if project.voice_preference == 'female' else '남성' }}</td></tr>
+      <tr><td>배경음악</td><td>{{ project.music_relative_path.split('/')[-1] if project.music_relative_path else '사용 안 함' }}</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<a class="btn secondary" style="margin-top:16px;width:auto;padding:0 20px" href="/dashboard">대시보드로 돌아가기</a>
+{% endblock %}
