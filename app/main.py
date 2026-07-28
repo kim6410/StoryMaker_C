@@ -419,6 +419,110 @@ def content_job_channel_revert(request: Request, job_uid: str, channel_code: str
     return RedirectResponse(url=f"/content/job/{job_uid}/channels", status_code=303)
 
 
+@app.post("/content/job/{job_uid}/tts/generate")
+def content_job_tts_generate(request: Request, job_uid: str):
+    """단계7: 영상원고 문장을 정규화해 Supertonic으로 TTS를 생성하고, 성공하면 SRT까지 만든다."""
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    project = _get_owned_project_or_none(job_uid, user)
+    if not project:
+        return RedirectResponse(url="/content/new")
+
+    from app.tts.service import generate_tts_for_project
+    from app.db import repository as repo
+    outcome = generate_tts_for_project(project)
+    repo.write_audit_log(
+        user["id"], "tts_generated", target_type="project", target_id=project["id"],
+        metadata_json=f'{{"ok": {str(outcome.ok).lower()}, "success": {outcome.success_sentences}, "failed": {outcome.failed_sentences}}}',
+    )
+    if outcome.ok:
+        from app.subtitle.srt_builder import build_srt_for_project
+        build_srt_for_project(project)
+    return RedirectResponse(url=f"/content/job/{job_uid}/tts", status_code=303)
+
+
+@app.post("/content/job/{job_uid}/tts/sentence/{sentence_index}/regenerate")
+def content_job_tts_sentence_regenerate(request: Request, job_uid: str, sentence_index: int):
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    project = _get_owned_project_or_none(job_uid, user)
+    if not project:
+        return RedirectResponse(url="/content/new")
+
+    from app.tts.service import regenerate_tts_sentence
+    from app.db import repository as repo
+    outcome = regenerate_tts_sentence(project, sentence_index)
+    repo.write_audit_log(user["id"], "tts_sentence_regenerated", target_type="project", target_id=project["id"])
+    if outcome.ok and outcome.failed_sentences == 0:
+        from app.subtitle.srt_builder import build_srt_for_project
+        build_srt_for_project(project)
+    return RedirectResponse(url=f"/content/job/{job_uid}/tts", status_code=303)
+
+
+@app.get("/content/job/{job_uid}/tts")
+def content_job_tts_page(request: Request, job_uid: str):
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    project = _get_owned_project_or_none(job_uid, user)
+    if not project:
+        return RedirectResponse(url="/content/new")
+
+    from app.db import repository as repo
+    sentences = repo.list_tts_sentences_for_project(project["id"])
+    master = repo.get_tts_master_for_project(project["id"])
+    srt = repo.get_srt_for_project(project["id"])
+    video_script = repo.get_video_script_for_project(project["id"])
+    return templates.TemplateResponse("content_job_tts.html", _ctx(
+        request, user, active="content_new", project=project, sentences=sentences,
+        master=master, srt=srt, has_script=bool(video_script),
+    ))
+
+
+@app.get("/content/job/{job_uid}/tts/audio/{filename}")
+def content_job_tts_audio(request: Request, job_uid: str, filename: str):
+    """문장별/전체 합성 WAV 스트리밍. 소유자만 접근 가능하고 파일명은 이 작업의 tts 폴더로만 해석한다."""
+    from fastapi import HTTPException
+    from fastapi.responses import FileResponse
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    project = _get_owned_project_or_none(job_uid, user)
+    if not project:
+        return RedirectResponse(url="/content/new")
+
+    from app.config import JOBS_DIR
+    safe_name = Path(filename).name
+    path = JOBS_DIR / job_uid / "tts" / safe_name
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="음성 파일을 찾을 수 없습니다.")
+    return FileResponse(path, media_type="audio/wav")
+
+
+@app.get("/content/job/{job_uid}/subtitle/download")
+def content_job_subtitle_download(request: Request, job_uid: str):
+    from fastapi import HTTPException
+    from fastapi.responses import FileResponse
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    project = _get_owned_project_or_none(job_uid, user)
+    if not project:
+        return RedirectResponse(url="/content/new")
+
+    from app.db import repository as repo
+    from app.config import PROJECT_ROOT
+    srt = repo.get_srt_for_project(project["id"])
+    if not srt or srt["status"] != "success":
+        raise HTTPException(status_code=404, detail="SRT가 아직 없습니다.")
+    path = PROJECT_ROOT / srt["relative_srt_path"]
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="SRT 파일을 찾을 수 없습니다.")
+    return FileResponse(path, media_type="application/x-subrip", filename="subtitle.srt")
+
+
 @app.get("/content/channels")
 def content_channels_page(request: Request):
     user = _require_login_or_redirect(request)

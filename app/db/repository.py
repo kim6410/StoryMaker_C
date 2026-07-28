@@ -797,3 +797,129 @@ def get_video_script_for_project(project_id: int) -> Optional[dict]:
             "SELECT * FROM content_video_scripts WHERE project_id=?", (project_id,)
         ).fetchone()
         return dict(row) if row else None
+
+
+# ---------------------------------------------------------------------------
+# content_tts_sentences / content_tts_master / content_srt (단계7)
+# ---------------------------------------------------------------------------
+def replace_tts_sentences(project_id: int, sentences: list[dict]) -> None:
+    """한 프로젝트의 문장별 TTS 계획을 통째로 다시 쓴다(최초 생성 시에만 사용).
+    이미 생성된 실제 wav 파일이 있는 뒤에는 이 함수를 다시 호출하지 않고
+    upsert_tts_sentence_result()로 문장별 결과만 갱신한다."""
+    now = _now()
+    with get_connection() as conn:
+        conn.execute("DELETE FROM content_tts_sentences WHERE project_id=?", (project_id,))
+        conn.executemany(
+            """
+            INSERT INTO content_tts_sentences
+                (project_id, sentence_index, scene_index, original_text, normalized_text,
+                 voice, speed, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)
+            """,
+            [
+                (project_id, s["sentence_index"], s["scene_index"], s["original_text"],
+                 s["normalized_text"], s["voice"], s["speed"], now, now)
+                for s in sentences
+            ],
+        )
+
+
+def upsert_tts_sentence_result(project_id: int, sentence_index: int, status: str,
+                                relative_wav_path: str = "", duration_seconds: float = 0.0,
+                                error_code: str = "") -> None:
+    with get_connection() as conn:
+        conn.execute(
+            """
+            UPDATE content_tts_sentences SET
+                status=?, relative_wav_path=?, duration_seconds=?, error_code=?, updated_at=?
+            WHERE project_id=? AND sentence_index=?
+            """,
+            (status, relative_wav_path, duration_seconds, error_code, _now(), project_id, sentence_index),
+        )
+
+
+def list_tts_sentences_for_project(project_id: int) -> list[dict]:
+    with get_readonly_connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM content_tts_sentences WHERE project_id=? ORDER BY sentence_index",
+            (project_id,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def upsert_tts_master(project_id: int, status: str, relative_wav_path: str = "",
+                       total_duration_seconds: float = 0.0, sentence_gap_seconds: float = 0.0,
+                       voice: str = "", error_code: str = "") -> None:
+    now = _now()
+    with get_connection() as conn:
+        existing = conn.execute(
+            "SELECT id FROM content_tts_master WHERE project_id=?", (project_id,)
+        ).fetchone()
+        if existing:
+            conn.execute(
+                """
+                UPDATE content_tts_master SET
+                    status=?, relative_wav_path=?, total_duration_seconds=?, sentence_gap_seconds=?,
+                    voice=?, error_code=?, updated_at=?
+                WHERE id=?
+                """,
+                (status, relative_wav_path, total_duration_seconds, sentence_gap_seconds,
+                 voice, error_code, now, existing["id"]),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO content_tts_master
+                    (project_id, relative_wav_path, total_duration_seconds, sentence_gap_seconds,
+                     voice, status, error_code, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (project_id, relative_wav_path, total_duration_seconds, sentence_gap_seconds,
+                 voice, status, error_code, now, now),
+            )
+
+
+def get_tts_master_for_project(project_id: int) -> Optional[dict]:
+    with get_readonly_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM content_tts_master WHERE project_id=?", (project_id,)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def upsert_srt_result(project_id: int, status: str, relative_srt_path: str = "", cue_count: int = 0,
+                       last_cue_end_seconds: float = 0.0, audio_duration_seconds: float = 0.0,
+                       drift_seconds: float = 0.0, error_code: str = "") -> None:
+    now = _now()
+    with get_connection() as conn:
+        existing = conn.execute(
+            "SELECT id FROM content_srt WHERE project_id=?", (project_id,)
+        ).fetchone()
+        if existing:
+            conn.execute(
+                """
+                UPDATE content_srt SET
+                    status=?, relative_srt_path=?, cue_count=?, last_cue_end_seconds=?,
+                    audio_duration_seconds=?, drift_seconds=?, error_code=?, updated_at=?
+                WHERE id=?
+                """,
+                (status, relative_srt_path, cue_count, last_cue_end_seconds,
+                 audio_duration_seconds, drift_seconds, error_code, now, existing["id"]),
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO content_srt
+                    (project_id, relative_srt_path, cue_count, last_cue_end_seconds,
+                     audio_duration_seconds, drift_seconds, status, error_code, created_at, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (project_id, relative_srt_path, cue_count, last_cue_end_seconds,
+                 audio_duration_seconds, drift_seconds, status, error_code, now, now),
+            )
+
+
+def get_srt_for_project(project_id: int) -> Optional[dict]:
+    with get_readonly_connection() as conn:
+        row = conn.execute("SELECT * FROM content_srt WHERE project_id=?", (project_id,)).fetchone()
+        return dict(row) if row else None

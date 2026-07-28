@@ -74,5 +74,8 @@
   {% endfor %}
 </div>
 
-<a class="btn secondary" style="margin-top:20px;width:auto;padding:0 24px" href="/content/job/{{ project.job_uid }}">작업 상태로 돌아가기</a>
+<div style="display:flex;gap:10px;margin-top:20px">
+  <a class="btn secondary" style="width:auto;padding:0 24px" href="/content/job/{{ project.job_uid }}">작업 상태로 돌아가기</a>
+  <a class="btn" style="width:auto;padding:0 24px" href="/content/job/{{ project.job_uid }}/tts">다음: 음성·자막(TTS·SRT) 만들기</a>
+</div>
 {% endblock %}

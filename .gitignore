@@ -4,6 +4,7 @@ __pycache__/
 data/
 logs/
 backups/
+temp/
 *.db
 *.db-wal
 *.db-shm

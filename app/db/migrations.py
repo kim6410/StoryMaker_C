@@ -304,6 +304,61 @@ def _migration_007_channel_results(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_008_tts_subtitle(conn: sqlite3.Connection) -> None:
+    """단계7: 문장별 TTS 결과, 전체 합성음성, SRT 결과를 각각 저장한다.
+    실제 음성 길이(ffprobe 측정)를 기준으로 SRT 타임라인을 만들기 위해 문장별 duration을
+    별도 컬럼으로 저장하고, 실패한 문장만 다시 만들 수 있도록 문장 단위로 상태를 관리한다."""
+    conn.executescript(
+        """
+        CREATE TABLE content_tts_sentences (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            sentence_index INTEGER NOT NULL,
+            scene_index INTEGER NOT NULL,
+            original_text TEXT NOT NULL DEFAULT '',
+            normalized_text TEXT NOT NULL DEFAULT '',
+            voice TEXT NOT NULL DEFAULT '',
+            speed REAL NOT NULL DEFAULT 1.0,
+            relative_wav_path TEXT NOT NULL DEFAULT '',
+            duration_seconds REAL NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','success','failed')),
+            error_code TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        CREATE UNIQUE INDEX idx_tts_sentences_project_index
+            ON content_tts_sentences(project_id, sentence_index);
+
+        CREATE TABLE content_tts_master (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL UNIQUE REFERENCES projects(id) ON DELETE CASCADE,
+            relative_wav_path TEXT NOT NULL DEFAULT '',
+            total_duration_seconds REAL NOT NULL DEFAULT 0,
+            sentence_gap_seconds REAL NOT NULL DEFAULT 0,
+            voice TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','success','failed')),
+            error_code TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE TABLE content_srt (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL UNIQUE REFERENCES projects(id) ON DELETE CASCADE,
+            relative_srt_path TEXT NOT NULL DEFAULT '',
+            cue_count INTEGER NOT NULL DEFAULT 0,
+            last_cue_end_seconds REAL NOT NULL DEFAULT 0,
+            audio_duration_seconds REAL NOT NULL DEFAULT 0,
+            drift_seconds REAL NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','success','failed')),
+            error_code TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        """
+    )
+
+
 # 순서대로 등록. 이미 적용된 번호는 다시 실행하지 않는다.
 MIGRATIONS: list[Migration] = [
     (1, "initial_schema", _migration_001_initial_schema),
@@ -313,6 +368,7 @@ MIGRATIONS: list[Migration] = [
     (5, "music_catalog", _migration_005_music_catalog),
     (6, "content_generation", _migration_006_content_generation),
     (7, "channel_results", _migration_007_channel_results),
+    (8, "tts_subtitle", _migration_008_tts_subtitle),
 ]
 
 

@@ -41,6 +41,14 @@ GEMINI_MODEL = _os.environ.get("GEMINI_MODEL") or "gemini-2.0-flash"
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
 GEMINI_REQUEST_TIMEOUT_SECONDS = 45
 
+# 단계7: TTS(Supertonic, 공개 오픈소스 pip 패키지). 모델 가중치는 최초 실행 시
+# Hugging Face에서 이 프로젝트 전용 캐시 경로로만 내려받는다(V1·Beta 모델 복사 없음).
+SUPERTONIC_MODEL_DIR = PROJECT_ROOT / "runtime" / "models" / "supertonic"
+SUPERTONIC_VOICE_FEMALE = _os.environ.get("SUPERTONIC_VOICE_FEMALE") or "F1"
+SUPERTONIC_VOICE_MALE = _os.environ.get("SUPERTONIC_VOICE_MALE") or "M1"
+SUPERTONIC_DEFAULT_SPEED = 1.0
+SUPERTONIC_SENTENCE_GAP_SECONDS = 0.4
+
 for _d in (DATA_DIR, JOBS_DIR, MEDIA_DIR, LOGS_DIR, BACKUPS_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 

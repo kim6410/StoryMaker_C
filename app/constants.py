@@ -143,6 +143,27 @@ CHANNEL_LABELS = {
 CHANNEL_PROMPT_VERSION = "6b-channels-v1"
 CHANNEL_RESPONSE_SCHEMA_VERSION = "6b-channels-v1"
 
+# ---- 단계7: TTS/SRT 오류 코드 ----
+TTS_ERR_NO_SCRIPT = "no_script"
+TTS_ERR_EMPTY_TEXT = "empty_text"
+TTS_ERR_ENGINE_ERROR = "engine_error"
+TTS_ERR_EMPTY_AUDIO = "empty_audio"
+TTS_ERR_SAVE_FAILED = "save_failed"
+
+TTS_ERROR_CODES = (
+    TTS_ERR_NO_SCRIPT,
+    TTS_ERR_EMPTY_TEXT,
+    TTS_ERR_ENGINE_ERROR,
+    TTS_ERR_EMPTY_AUDIO,
+    TTS_ERR_SAVE_FAILED,
+)
+TTS_MAX_RETRIES = 1
+
+SRT_ERR_NO_SENTENCES = "no_sentences"
+SRT_ERR_INCOMPLETE_AUDIO = "incomplete_audio"
+SRT_ERR_DRIFT_EXCEEDED = "drift_exceeded"
+SRT_SYNC_TOLERANCE_SECONDS = 0.5
+
 # ---- 보관함 미디어 종류 ----
 MEDIA_TYPE_IMAGE = "image"
 MEDIA_TYPE_AUDIO = "audio"

@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}음성·자막 - {{ app_name }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>{{ project.title }}</h1>
+  <p>영상원고를 문장 단위로 실제 음성(TTS)으로 만들고, 실제 음성 길이에 맞춰 자막(SRT)을 만듭니다.</p>
+</div>
+
+{% if not has_script %}
+<div class="card" style="border-color:var(--warn)">
+  <p style="color:var(--warn);font-size:12px;margin:0">
+    아직 영상 원고가 없습니다. 먼저 <a href="/content/job/{{ project.job_uid }}/channels">SNS 8채널 생성</a>을 완료해 주세요.
+  </p>
+</div>
+{% else %}
+
+<div class="card">
+  <form method="post" action="/content/job/{{ project.job_uid }}/tts/generate">
+    <button class="btn" type="submit" style="width:auto;padding:0 20px">
+      {% if sentences %}TTS·SRT 다시 만들기{% else %}TTS·SRT 만들기{% endif %}
+    </button>
+  </form>
+
+  {% if master %}
+  <p style="color:var(--muted);font-size:12px;margin:10px 0 0">
+    전체 음성 상태: <b>{{ master.status }}</b>
+    {% if master.status == 'success' %}· 길이 {{ '%.2f'|format(master.total_duration_seconds) }}초{% endif %}
+  </p>
+  {% if master.status == 'success' %}
+  <audio controls style="width:100%;margin-top:8px" src="/content/job/{{ project.job_uid }}/tts/audio/full.wav"></audio>
+  {% endif %}
+  {% endif %}
+
+  {% if srt %}
+  <p style="color:var(--muted);font-size:12px;margin:10px 0 0">
+    SRT 상태: <b>{{ srt.status }}</b>
+    {% if srt.status == 'success' %}
+    · {{ srt.cue_count }}개 자막 · 마지막 종료 {{ '%.2f'|format(srt.last_cue_end_seconds) }}초
+    · 오차 {{ '%.3f'|format(srt.drift_seconds) }}초
+    <a href="/content/job/{{ project.job_uid }}/subtitle/download">SRT 다운로드</a>
+    {% else %}
+    · {{ srt.error_code }}
+    {% endif %}
+  </p>
+  {% endif %}
+</div>
+
+{% if sentences %}
+<div class="card" style="margin-top:14px">
+  <h3 style="margin-top:0">문장별 음성 ({{ sentences|length }}개)</h3>
+  <table>
+    <thead><tr><th>#</th><th>자막 텍스트</th><th>상태</th><th>길이</th><th>재생</th><th></th></tr></thead>
+    <tbody>
+      {% for s in sentences %}
+      <tr>
+        <td>{{ s.sentence_index + 1 }}</td>
+        <td style="max-width:320px">{{ s.original_text }}</td>
+        <td><span class="badge {{ 'ok' if s.status == 'success' else ('muted' if s.status == 'pending' else 'warn') }}">{{ s.status }}{% if s.error_code %} ({{ s.error_code }}){% endif %}</span></td>
+        <td>{% if s.status == 'success' %}{{ '%.2f'|format(s.duration_seconds) }}초{% else %}-{% endif %}</td>
+        <td>
+          {% if s.status == 'success' %}
+          <audio controls style="height:28px;max-width:180px" src="/content/job/{{ project.job_uid }}/tts/audio/sentence_{{ '%03d'|format(s.sentence_index) }}.wav"></audio>
+          {% endif %}
+        </td>
+        <td>
+          {% if s.status != 'success' %}
+          <form method="post" action="/content/job/{{ project.job_uid }}/tts/sentence/{{ s.sentence_index }}/regenerate">
+            <button class="btn ghost" type="submit" style="width:auto;padding:0 10px">재생성</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{% endif %}
+
+<div style="display:flex;gap:10px;margin-top:20px">
+  <a class="btn secondary" style="width:auto;padding:0 24px" href="/content/job/{{ project.job_uid }}/channels">채널 결과로 돌아가기</a>
+</div>
+{% endblock %}
