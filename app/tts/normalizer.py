@@ -11,7 +11,16 @@ import re
 from dataclasses import dataclass
 
 _SPEAKER_TAG_RE = re.compile(r"\[[^\[\]]{1,12}\]")
-_PHONE_RE = re.compile(r"(?<!\d)(0\d{1,2}[-\s]?\d{3,4}[-\s]?\d{4})(?!\d)")
+# 하이픈/공백/점으로 구분된 전화번호(010-8284-5584, 02-1234-5678, 052-123-4567,
+# 1588-1234)와 구분자 없는 전화번호(01082845584, 15881234)를 모두 잡는다.
+_PHONE_RE = re.compile(
+    r"(?<!\d)("
+    r"0\d{1,2}[-.\s]\d{3,4}[-.\s]\d{4}"
+    r"|1\d{3}[-.\s]\d{4}"
+    r"|0\d{9,10}"
+    r"|1\d{7}"
+    r")(?!\d)"
+)
 _NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
 _MAX_SENTENCE_LEN = 80
 
@@ -36,9 +45,40 @@ def strip_speaker_tags(text: str) -> str:
     return _SPEAKER_TAG_RE.sub("", text).strip()
 
 
+def _group_phone_digits(raw: str) -> list[str]:
+    """구분자가 있으면 그 구분을 그대로 따르고(예: 010-8284-5584 -> [010,8284,5584]),
+    구분자가 없으면(01082845584) 자릿수·시작번호로 국번 관례에 맞게 묶는다."""
+    if re.search(r"[-.\s]", raw):
+        return [g for g in re.split(r"[-.\s]", raw) if g]
+
+    digits = raw
+    n = len(digits)
+    if n == 11 and digits.startswith("0"):
+        sizes = [3, 4, 4]
+    elif n == 10 and digits.startswith("02"):
+        sizes = [2, 4, 4]
+    elif n == 10 and digits.startswith("0"):
+        sizes = [3, 3, 4]
+    elif n == 9 and digits.startswith("02"):
+        sizes = [2, 3, 4]
+    elif n == 8:
+        sizes = [4, 4]
+    else:
+        return [digits]
+
+    groups = []
+    pos = 0
+    for size in sizes:
+        groups.append(digits[pos:pos + size])
+        pos += size
+    return groups
+
+
 def _read_phone_digits(match: re.Match) -> str:
-    digits = re.sub(r"[-\s]", "", match.group(0))
-    return " ".join(_DIGIT_KO[d] for d in digits)
+    """전화번호는 수량이 아니라 자리별로 읽는다. 묶음 사이는 쉼표로 짧은 호흡을 준다.
+    예: 010-8284-5584 -> '공일공, 팔이팔사, 오오팔사' (작업지시 8-5장)."""
+    groups = _group_phone_digits(match.group(0))
+    return ", ".join("".join(_DIGIT_KO[d] for d in g) for g in groups)
 
 
 def _read_group_of_four(n: int) -> str:
