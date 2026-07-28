@@ -31,6 +31,16 @@ FFMPEG_PATH = FFMPEG_DIR / "ffmpeg.exe"
 
 DB_PATH = DATA_DIR / "storymaker_claude.db"
 
+# Gemini 연동. 값이 config/.env에 없으면 OS 환경변수(예: 다른 세션이 설정한
+# 사용자 수준 GEMINI_API_KEY)를 그대로 사용한다 - load_dotenv는 기존 환경변수를
+# 덮어쓰지 않는다.
+import os as _os
+
+GEMINI_API_KEY = _os.environ.get("GEMINI_API_KEY", "")
+GEMINI_MODEL = _os.environ.get("GEMINI_MODEL") or "gemini-2.0-flash"
+GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
+GEMINI_REQUEST_TIMEOUT_SECONDS = 45
+
 for _d in (DATA_DIR, JOBS_DIR, MEDIA_DIR, LOGS_DIR, BACKUPS_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 

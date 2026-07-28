@@ -14,13 +14,46 @@
   <div class="card" style="border-color:var(--warn);margin-top:14px">
     <b style="color:var(--warn);font-size:12px">AI 콘텐츠 생성 대기 중</b>
     <p style="color:var(--muted);font-size:12px;margin:6px 0">
-      이 작업은 정상적으로 저장됐지만, Gemini API 키가 아직 설정되지 않아 SNS 8채널 콘텐츠 자동 생성 단계로 진행할 수 없습니다.
+      이 작업은 정상적으로 저장됐지만, Gemini API 키가 아직 설정되지 않아 콘텐츠 자동 생성 단계로 진행할 수 없습니다.
       <code>config/.env</code>의 <code>GEMINI_API_KEY</code>를 채운 뒤 다시 시도해 주세요.
     </p>
   </div>
   {% else %}
-  <div class="card" style="margin-top:14px;color:var(--muted);font-size:13px">
-    AI 콘텐츠 생성 기능은 다음 업데이트에서 이 화면에 연결될 예정입니다.
+  <div class="card" style="margin-top:14px">
+    <form method="post" action="/content/job/{{ project.job_uid }}/generate">
+      <button class="btn" type="submit" style="width:auto;padding:0 20px">
+        {% if result %}다시 생성하기{% else %}AI 콘텐츠 생성하기 (시험용){% endif %}
+      </button>
+    </form>
+
+    {% if gen_error_message %}
+    <p style="color:var(--warn);font-size:12px;margin:10px 0 0">{{ gen_error_message }}</p>
+    {% endif %}
+
+    {% if last_generation %}
+    <p style="color:var(--muted);font-size:11px;margin:10px 0 0">
+      마지막 시도: {{ last_generation.status }}
+      {% if last_generation.error_code %}({{ last_generation.error_code }}){% endif %}
+      · provider={{ last_generation.provider }} model={{ last_generation.model }}
+      · latency={{ last_generation.latency_ms }}ms · retry={{ last_generation.retry_count }}
+    </p>
+    {% endif %}
+
+    {% if result %}
+    <div class="card" style="margin-top:14px">
+      <h4 style="margin-top:0">생성 결과 (시험용 단일 계약, SNS 8채널은 다음 단계)</h4>
+      <table>
+        <tbody>
+          <tr><td>제목</td><td>{{ result.title }}</td></tr>
+          <tr><td>요약</td><td>{{ result.summary }}</td></tr>
+          <tr><td>본문</td><td>{{ result.body }}</td></tr>
+          <tr><td>CTA</td><td>{{ result.call_to_action }}</td></tr>
+          <tr><td>키워드</td><td>{{ result.keywords|join(', ') }}</td></tr>
+          <tr><td>숏폼 원고</td><td>{{ result.shortform_script }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
   </div>
   {% endif %}
 </div>

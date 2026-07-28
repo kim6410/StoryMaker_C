@@ -244,23 +244,71 @@ def create_content_job(
     return RedirectResponse(url=f"/content/job/{project['job_uid']}", status_code=303)
 
 
+def _get_owned_project_or_none(job_uid: str, user: dict):
+    """job_uid로 프로젝트를 찾되, 본인 소유이거나 관리자일 때만 반환한다.
+    다른 사용자의 작업 ID로는 URL을 알아도 접근할 수 없어야 한다(계획서 14장)."""
+    from app.db import repository as repo
+    project = repo.get_project_by_uid(job_uid)
+    if not project:
+        return None
+    if project["user_id"] != user["id"] and str(user.get("role")) != "admin":
+        return None
+    return project
+
+
 @app.get("/content/job/{job_uid}")
-def content_job_status(request: Request, job_uid: str):
+def content_job_status(request: Request, job_uid: str, gen_error: str = ""):
     import json
     user = _require_login_or_redirect(request)
     if not user:
         return RedirectResponse(url="/login")
     from app.db import repository as repo
-    project = repo.get_project_by_uid(job_uid)
-    if not project or project["user_id"] != user["id"]:
-        if not (project and str(user.get("role")) == "admin"):
-            return RedirectResponse(url="/content/new")
+    from app.constants import GEMINI_ERROR_CODES
+    project = _get_owned_project_or_none(job_uid, user)
+    if not project:
+        return RedirectResponse(url="/content/new")
     snapshot = json.loads(project["input_snapshot_json"] or "{}")
     gemini_configured = bool((os.getenv("GEMINI_API_KEY") or "").strip())
+    result = repo.get_latest_generation_result_for_project(project["id"])
+    if result and result.get("keywords_json"):
+        result = {**result, "keywords": json.loads(result["keywords_json"])}
+    generations = repo.list_content_generations_for_project(project["id"])
+    last_generation = generations[-1] if generations else None
+    gen_error_message = ""
+    if gen_error and gen_error in GEMINI_ERROR_CODES:
+        from app.ai.service import USER_ERROR_MESSAGES
+        gen_error_message = USER_ERROR_MESSAGES.get(gen_error, "")
     return templates.TemplateResponse("content_job_status.html", _ctx(
         request, user, active="content_new", project=project, snapshot=snapshot,
-        gemini_configured=gemini_configured,
+        gemini_configured=gemini_configured, result=result, last_generation=last_generation,
+        gen_error_message=gen_error_message,
     ))
+
+
+@app.post("/content/job/{job_uid}/generate")
+def content_job_generate(request: Request, job_uid: str):
+    """6A단계: 실제 Gemini API를 호출해 이 작업의 시험용 콘텐츠를 생성한다."""
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    project = _get_owned_project_or_none(job_uid, user)
+    if not project:
+        return RedirectResponse(url="/content/new")
+
+    from app.ai.service import generate_for_project
+    from app.db import repository as repo
+    try:
+        outcome = generate_for_project(project)
+    except Exception:
+        return RedirectResponse(url=f"/content/job/{job_uid}?gen_error=unknown_provider_error", status_code=303)
+
+    repo.write_audit_log(
+        user["id"], "content_generation_attempted", target_type="project", target_id=project["id"],
+        metadata_json=f'{{"ok": {str(outcome.ok).lower()}, "error_code": "{outcome.error_code}"}}',
+    )
+    if outcome.ok:
+        return RedirectResponse(url=f"/content/job/{job_uid}", status_code=303)
+    return RedirectResponse(url=f"/content/job/{job_uid}?gen_error={outcome.error_code}", status_code=303)
 
 
 @app.get("/content/channels")

@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import secrets
+import sqlite3
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -560,3 +561,104 @@ def consume_password_reset_token(token_hash: str) -> Optional[int]:
             "UPDATE password_reset_tokens SET consumed_at=? WHERE id=?", (_now(), row["id"])
         )
         return int(row["user_id"])
+
+
+class DuplicateGenerationError(Exception):
+    """같은 프로젝트에 이미 진행 중(pending)인 생성 요청이 있을 때 발생시킨다."""
+
+
+# ---------------------------------------------------------------------------
+# content_generations / content_generation_results (6A단계: Gemini 프롬프트 생성)
+# ---------------------------------------------------------------------------
+def create_content_generation(project_id: int, user_id: int, provider: str, model: str,
+                               prompt_version: str, response_schema_version: str,
+                               attempt_no: int = 1) -> int:
+    """status='pending' 행을 만든다. 같은 project_id에 이미 pending 행이 있으면
+    idx_content_generations_pending_lock 유니크 인덱스 위반으로 DuplicateGenerationError를 낸다."""
+    now = _now()
+    try:
+        with get_connection() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO content_generations
+                    (project_id, user_id, attempt_no, provider, model, prompt_version,
+                     response_schema_version, status, request_started_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+                """,
+                (project_id, user_id, attempt_no, provider, model, prompt_version,
+                 response_schema_version, now),
+            )
+            return int(cur.lastrowid)
+    except sqlite3.IntegrityError as exc:
+        # content_generations에는 이 부분 유니크 인덱스(프로젝트당 pending 1개) 외에
+        # 다른 유니크 제약이 없으므로, 이 INSERT에서 나는 IntegrityError는 전부
+        # 중복 생성 요청으로 간주한다. SQLite 버전에 따라 오류 메시지가 인덱스 이름이
+        # 아니라 컬럼 이름만 담기도 해서(e.g. "UNIQUE constraint failed:
+        # content_generations.project_id") 메시지 문자열로 판별하지 않는다.
+        raise DuplicateGenerationError(str(exc)) from exc
+
+
+def complete_content_generation(generation_id: int, status: str, http_status: Optional[int] = None,
+                                 error_code: str = "", retry_count: int = 0,
+                                 latency_ms: int = 0) -> None:
+    with get_connection() as conn:
+        conn.execute(
+            """
+            UPDATE content_generations SET
+                status=?, http_status=?, error_code=?, retry_count=?, latency_ms=?, completed_at=?
+            WHERE id=?
+            """,
+            (status, http_status, error_code, retry_count, latency_ms, _now(), generation_id),
+        )
+
+
+def get_content_generation(generation_id: int) -> Optional[dict]:
+    with get_readonly_connection() as conn:
+        row = conn.execute("SELECT * FROM content_generations WHERE id=?", (generation_id,)).fetchone()
+        return dict(row) if row else None
+
+
+def count_content_generation_attempts(project_id: int) -> int:
+    with get_readonly_connection() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM content_generations WHERE project_id=?", (project_id,)
+        ).fetchone()
+        return int(row[0])
+
+
+def list_content_generations_for_project(project_id: int) -> list[dict]:
+    with get_readonly_connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM content_generations WHERE project_id=? ORDER BY attempt_no", (project_id,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def save_generation_result(generation_id: int, project_id: int, fields: dict) -> int:
+    with get_connection() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO content_generation_results
+                (generation_id, project_id, title, summary, body, call_to_action,
+                 keywords_json, shortform_script, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                generation_id, project_id, fields.get("title", ""), fields.get("summary", ""),
+                fields.get("body", ""), fields.get("call_to_action", ""),
+                fields.get("keywords_json", "[]"), fields.get("shortform_script", ""), _now(),
+            ),
+        )
+        return int(cur.lastrowid)
+
+
+def get_latest_generation_result_for_project(project_id: int) -> Optional[dict]:
+    with get_readonly_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT * FROM content_generation_results
+            WHERE project_id=? ORDER BY id DESC LIMIT 1
+            """,
+            (project_id,),
+        ).fetchone()
+        return dict(row) if row else None

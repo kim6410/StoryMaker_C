@@ -215,6 +215,53 @@ def _migration_005_music_catalog(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_006_content_generation(conn: sqlite3.Connection) -> None:
+    """6A단계: Gemini 프롬프트 생성 호출 이력과 단일 시험용 결과 저장.
+    Gemini 원문 프롬프트/응답 전체는 저장하지 않는다(로그·저장 정책, 작업지시 11장).
+    같은 프로젝트에 동시에 두 번 생성 요청이 들어오는 것을 막기 위해
+    status='pending'인 행은 프로젝트당 최대 1개만 허용하는 부분 유니크 인덱스를 둔다.
+    SNS 8채널 결과 저장은 6B단계에서 별도 테이블로 추가한다."""
+    conn.executescript(
+        """
+        CREATE TABLE content_generations (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            attempt_no INTEGER NOT NULL DEFAULT 1,
+            provider TEXT NOT NULL DEFAULT 'gemini',
+            model TEXT NOT NULL DEFAULT '',
+            prompt_version TEXT NOT NULL DEFAULT '',
+            response_schema_version TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','success','failed')),
+            http_status INTEGER,
+            error_code TEXT NOT NULL DEFAULT '',
+            retry_count INTEGER NOT NULL DEFAULT 0,
+            request_started_at TEXT NOT NULL,
+            completed_at TEXT,
+            latency_ms INTEGER NOT NULL DEFAULT 0
+        );
+
+        CREATE TABLE content_generation_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            generation_id INTEGER NOT NULL REFERENCES content_generations(id) ON DELETE CASCADE,
+            project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            title TEXT NOT NULL DEFAULT '',
+            summary TEXT NOT NULL DEFAULT '',
+            body TEXT NOT NULL DEFAULT '',
+            call_to_action TEXT NOT NULL DEFAULT '',
+            keywords_json TEXT NOT NULL DEFAULT '[]',
+            shortform_script TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL
+        );
+
+        CREATE INDEX idx_content_generations_project ON content_generations(project_id);
+        CREATE UNIQUE INDEX idx_content_generations_pending_lock
+            ON content_generations(project_id) WHERE status='pending';
+        CREATE INDEX idx_content_generation_results_project ON content_generation_results(project_id);
+        """
+    )
+
+
 # 순서대로 등록. 이미 적용된 번호는 다시 실행하지 않는다.
 MIGRATIONS: list[Migration] = [
     (1, "initial_schema", _migration_001_initial_schema),
@@ -222,6 +269,7 @@ MIGRATIONS: list[Migration] = [
     (3, "companies", _migration_003_companies),
     (4, "project_content_fields", _migration_004_project_content_fields),
     (5, "music_catalog", _migration_005_music_catalog),
+    (6, "content_generation", _migration_006_content_generation),
 ]
 
 
