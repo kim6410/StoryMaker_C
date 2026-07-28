@@ -262,6 +262,48 @@ def _migration_006_content_generation(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_007_channel_results(conn: sqlite3.Connection) -> None:
+    """6B단계: SNS 8채널 결과와 숏폼 영상원고(장면 문장 목록 포함)를 채널별 행으로 저장한다.
+    채널 하나 재생성/수정/원복이 다른 7개 채널을 건드리지 않도록 (project_id, channel_code)
+    유니크 인덱스로 채널당 행을 1개만 유지하고 UPSERT한다."""
+    conn.executescript(
+        """
+        CREATE TABLE content_channel_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            generation_id INTEGER NOT NULL REFERENCES content_generations(id) ON DELETE CASCADE,
+            project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            channel_code TEXT NOT NULL,
+            title TEXT NOT NULL DEFAULT '',
+            body TEXT NOT NULL DEFAULT '',
+            hashtags_json TEXT NOT NULL DEFAULT '[]',
+            cta TEXT NOT NULL DEFAULT '',
+            original_title TEXT NOT NULL DEFAULT '',
+            original_body TEXT NOT NULL DEFAULT '',
+            original_hashtags_json TEXT NOT NULL DEFAULT '[]',
+            original_cta TEXT NOT NULL DEFAULT '',
+            is_edited INTEGER NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'ready' CHECK (status IN ('ready','regenerating','error')),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+
+        CREATE UNIQUE INDEX idx_channel_results_project_channel
+            ON content_channel_results(project_id, channel_code);
+        CREATE INDEX idx_channel_results_generation ON content_channel_results(generation_id);
+
+        CREATE TABLE content_video_scripts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            generation_id INTEGER NOT NULL REFERENCES content_generations(id) ON DELETE CASCADE,
+            project_id INTEGER NOT NULL UNIQUE REFERENCES projects(id) ON DELETE CASCADE,
+            voice_script TEXT NOT NULL DEFAULT '',
+            scene_sentences_json TEXT NOT NULL DEFAULT '[]',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        """
+    )
+
+
 # 순서대로 등록. 이미 적용된 번호는 다시 실행하지 않는다.
 MIGRATIONS: list[Migration] = [
     (1, "initial_schema", _migration_001_initial_schema),
@@ -270,6 +312,7 @@ MIGRATIONS: list[Migration] = [
     (4, "project_content_fields", _migration_004_project_content_fields),
     (5, "music_catalog", _migration_005_music_catalog),
     (6, "content_generation", _migration_006_content_generation),
+    (7, "channel_results", _migration_007_channel_results),
 ]
 
 

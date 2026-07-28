@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}SNS 8채널 결과 - {{ app_name }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>{{ project.title }}</h1>
+  <p>작업 번호: {{ project.job_uid }} · 채널마다 직접 수정, 원복, 재생성할 수 있습니다.</p>
+</div>
+
+{% if channel_error_message %}
+<div class="card" style="border-color:var(--warn);margin-bottom:14px">
+  <p style="color:var(--warn);font-size:12px;margin:0">{{ channel_error_message }}</p>
+</div>
+{% endif %}
+
+<div class="grid cols-2">
+  {% for ch in channels %}
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+      <b>{{ ch.label }}</b>
+      <span class="badge {{ 'ok' if ch.row and ch.row.status == 'ready' else 'warn' }}">
+        {% if not ch.row %}미생성{% elif ch.row.is_edited %}수정됨{% else %}완료{% endif %}
+      </span>
+    </div>
+
+    {% if ch.row %}
+    <form method="post" action="/content/job/{{ project.job_uid }}/channels/{{ ch.code }}/edit" style="margin-bottom:8px">
+      <label style="font-size:11px;color:var(--muted)">제목</label>
+      <input type="text" name="title" value="{{ ch.row.title }}" style="width:100%;margin-bottom:6px">
+      <label style="font-size:11px;color:var(--muted)">본문</label>
+      <textarea name="body" rows="4" style="width:100%;margin-bottom:6px">{{ ch.row.body }}</textarea>
+      <label style="font-size:11px;color:var(--muted)">CTA</label>
+      <input type="text" name="cta" value="{{ ch.row.cta }}" style="width:100%;margin-bottom:6px">
+      <label style="font-size:11px;color:var(--muted)">해시태그(쉼표로 구분)</label>
+      <input type="text" name="hashtags" value="{{ ch.hashtags|join(', ') }}" style="width:100%;margin-bottom:8px">
+
+      {% if ch.code == 'shortform_script' and video_script %}
+      <div style="font-size:11px;color:var(--muted);margin-bottom:8px">
+        <b>내레이션 원고</b>
+        <p style="margin:4px 0">{{ video_script.voice_script }}</p>
+        <b>장면 문장 ({{ scene_sentences|length }}개)</b>
+        <ol style="margin:4px 0 0 18px;padding:0">
+          {% for s in scene_sentences %}<li>{{ s }}</li>{% endfor %}
+        </ol>
+      </div>
+      {% endif %}
+
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn ghost" type="submit" style="width:auto;padding:0 14px">저장</button>
+        <button class="btn ghost" type="button" data-copy="#chan-{{ ch.code }}" style="width:auto;padding:0 14px">복사</button>
+      </div>
+    </form>
+    <div id="chan-{{ ch.code }}" style="display:none">{{ ch.row.title }}
+{{ ch.row.body }}
+{{ ch.row.cta }}
+{{ ch.hashtags|join(' ') }}</div>
+
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <form method="post" action="/content/job/{{ project.job_uid }}/channels/{{ ch.code }}/regenerate">
+        <button class="btn secondary" type="submit" style="width:auto;padding:0 14px">이 채널만 재생성</button>
+      </form>
+      {% if ch.row.is_edited %}
+      <form method="post" action="/content/job/{{ project.job_uid }}/channels/{{ ch.code }}/revert">
+        <button class="btn ghost" type="submit" style="width:auto;padding:0 14px">원본으로 되돌리기</button>
+      </form>
+      {% endif %}
+    </div>
+    {% else %}
+    <p style="color:var(--muted);font-size:12px">아직 생성되지 않았습니다.</p>
+    <form method="post" action="/content/job/{{ project.job_uid }}/channels/{{ ch.code }}/regenerate">
+      <button class="btn secondary" type="submit" style="width:auto;padding:0 14px">이 채널 생성</button>
+    </form>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+
+<a class="btn secondary" style="margin-top:20px;width:auto;padding:0 24px" href="/content/job/{{ project.job_uid }}">작업 상태로 돌아가기</a>
+{% endblock %}

@@ -287,7 +287,7 @@ def content_job_status(request: Request, job_uid: str, gen_error: str = ""):
 
 @app.post("/content/job/{job_uid}/generate")
 def content_job_generate(request: Request, job_uid: str):
-    """6A단계: 실제 Gemini API를 호출해 이 작업의 시험용 콘텐츠를 생성한다."""
+    """6B단계: 실제 Gemini API를 호출해 SNS 8채널 + 숏폼 영상원고를 생성한다."""
     user = _require_login_or_redirect(request)
     if not user:
         return RedirectResponse(url="/login")
@@ -295,10 +295,10 @@ def content_job_generate(request: Request, job_uid: str):
     if not project:
         return RedirectResponse(url="/content/new")
 
-    from app.ai.service import generate_for_project
+    from app.ai.service import generate_channels_for_project
     from app.db import repository as repo
     try:
-        outcome = generate_for_project(project)
+        outcome = generate_channels_for_project(project)
     except Exception:
         return RedirectResponse(url=f"/content/job/{job_uid}?gen_error=unknown_provider_error", status_code=303)
 
@@ -307,8 +307,116 @@ def content_job_generate(request: Request, job_uid: str):
         metadata_json=f'{{"ok": {str(outcome.ok).lower()}, "error_code": "{outcome.error_code}"}}',
     )
     if outcome.ok:
-        return RedirectResponse(url=f"/content/job/{job_uid}", status_code=303)
+        return RedirectResponse(url=f"/content/job/{job_uid}/channels", status_code=303)
     return RedirectResponse(url=f"/content/job/{job_uid}?gen_error={outcome.error_code}", status_code=303)
+
+
+@app.get("/content/job/{job_uid}/channels")
+def content_job_channels_page(request: Request, job_uid: str, channel_error: str = ""):
+    import json
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    project = _get_owned_project_or_none(job_uid, user)
+    if not project:
+        return RedirectResponse(url="/content/new")
+
+    from app.db import repository as repo
+    from app.constants import CHANNEL_CODES, CHANNEL_LABELS, GEMINI_ERROR_CODES
+
+    rows_by_code = {r["channel_code"]: r for r in repo.list_channel_results_for_project(project["id"])}
+    channels = []
+    for code in CHANNEL_CODES:
+        row = rows_by_code.get(code)
+        channels.append({
+            "code": code,
+            "label": CHANNEL_LABELS[code],
+            "row": row,
+            "hashtags": json.loads(row["hashtags_json"]) if row else [],
+        })
+    video_script = repo.get_video_script_for_project(project["id"])
+    scene_sentences = json.loads(video_script["scene_sentences_json"]) if video_script else []
+
+    channel_error_message = ""
+    if channel_error and channel_error in GEMINI_ERROR_CODES:
+        from app.ai.service import USER_ERROR_MESSAGES
+        channel_error_message = USER_ERROR_MESSAGES.get(channel_error, "")
+
+    return templates.TemplateResponse("content_job_channels.html", _ctx(
+        request, user, active="content_new", project=project, channels=channels,
+        video_script=video_script, scene_sentences=scene_sentences,
+        channel_error_message=channel_error_message,
+    ))
+
+
+@app.post("/content/job/{job_uid}/channels/{channel_code}/regenerate")
+def content_job_channel_regenerate(request: Request, job_uid: str, channel_code: str):
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    project = _get_owned_project_or_none(job_uid, user)
+    if not project:
+        return RedirectResponse(url="/content/new")
+
+    from app.ai.service import regenerate_channel_for_project
+    from app.db import repository as repo
+    try:
+        outcome = regenerate_channel_for_project(project, channel_code)
+    except Exception:
+        return RedirectResponse(
+            url=f"/content/job/{job_uid}/channels?channel_error=unknown_provider_error", status_code=303
+        )
+    repo.write_audit_log(
+        user["id"], "channel_regenerated", target_type="project", target_id=project["id"],
+        metadata_json=f'{{"channel": "{channel_code}", "ok": {str(outcome.ok).lower()}}}',
+    )
+    if outcome.ok:
+        return RedirectResponse(url=f"/content/job/{job_uid}/channels", status_code=303)
+    return RedirectResponse(
+        url=f"/content/job/{job_uid}/channels?channel_error={outcome.error_code}", status_code=303
+    )
+
+
+@app.post("/content/job/{job_uid}/channels/{channel_code}/edit")
+def content_job_channel_edit(
+    request: Request, job_uid: str, channel_code: str,
+    title: str = Form(""), body: str = Form(""), cta: str = Form(""), hashtags: str = Form(""),
+):
+    import json
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    project = _get_owned_project_or_none(job_uid, user)
+    if not project:
+        return RedirectResponse(url="/content/new")
+
+    from app.db import repository as repo
+    from app.constants import CHANNEL_CODES
+    if channel_code not in CHANNEL_CODES:
+        return RedirectResponse(url=f"/content/job/{job_uid}/channels", status_code=303)
+
+    hashtag_list = [h.strip() for h in hashtags.split(",") if h.strip()]
+    repo.update_channel_result_manual_edit(
+        project["id"], channel_code, title.strip(), body.strip(),
+        json.dumps(hashtag_list, ensure_ascii=False), cta.strip(),
+    )
+    repo.write_audit_log(user["id"], "channel_manual_edit", target_type="project", target_id=project["id"])
+    return RedirectResponse(url=f"/content/job/{job_uid}/channels", status_code=303)
+
+
+@app.post("/content/job/{job_uid}/channels/{channel_code}/revert")
+def content_job_channel_revert(request: Request, job_uid: str, channel_code: str):
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    project = _get_owned_project_or_none(job_uid, user)
+    if not project:
+        return RedirectResponse(url="/content/new")
+
+    from app.db import repository as repo
+    repo.revert_channel_result(project["id"], channel_code)
+    repo.write_audit_log(user["id"], "channel_reverted", target_type="project", target_id=project["id"])
+    return RedirectResponse(url=f"/content/job/{job_uid}/channels", status_code=303)
 
 
 @app.get("/content/channels")

@@ -22,7 +22,7 @@
   <div class="card" style="margin-top:14px">
     <form method="post" action="/content/job/{{ project.job_uid }}/generate">
       <button class="btn" type="submit" style="width:auto;padding:0 20px">
-        {% if result %}다시 생성하기{% else %}AI 콘텐츠 생성하기 (시험용){% endif %}
+        {% if project.status == 'content_ready' %}SNS 8채널 다시 생성하기{% else %}SNS 8채널 생성하기{% endif %}
       </button>
     </form>
 
@@ -39,20 +39,9 @@
     </p>
     {% endif %}
 
-    {% if result %}
-    <div class="card" style="margin-top:14px">
-      <h4 style="margin-top:0">생성 결과 (시험용 단일 계약, SNS 8채널은 다음 단계)</h4>
-      <table>
-        <tbody>
-          <tr><td>제목</td><td>{{ result.title }}</td></tr>
-          <tr><td>요약</td><td>{{ result.summary }}</td></tr>
-          <tr><td>본문</td><td>{{ result.body }}</td></tr>
-          <tr><td>CTA</td><td>{{ result.call_to_action }}</td></tr>
-          <tr><td>키워드</td><td>{{ result.keywords|join(', ') }}</td></tr>
-          <tr><td>숏폼 원고</td><td>{{ result.shortform_script }}</td></tr>
-        </tbody>
-      </table>
-    </div>
+    {% if project.status == 'content_ready' %}
+    <a class="btn secondary" style="margin-top:14px;width:auto;padding:0 20px"
+       href="/content/job/{{ project.job_uid }}/channels">SNS 8채널 결과 보기</a>
     {% endif %}
   </div>
   {% endif %}

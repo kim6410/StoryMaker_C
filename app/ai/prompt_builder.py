@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass
 
-from app.constants import PROMPT_VERSION, RESPONSE_SCHEMA_VERSION
+from app.constants import CHANNEL_CODES, CHANNEL_LABELS, CHANNEL_SHORTFORM_SCRIPT, PROMPT_VERSION, RESPONSE_SCHEMA_VERSION
 
 
 @dataclass
@@ -89,3 +89,50 @@ _OUTPUT_CONTRACT = """출력 형식:
 
 def build_prompt(ctx: PromptContext) -> str:
     return "\n\n".join([_SYSTEM_RULES, _business_context_block(ctx), _OUTPUT_CONTRACT])
+
+
+def _channel_slot_schema(channel_code: str) -> dict:
+    base = {"title": "제목(채널 성격에 맞는 길이)", "body": "본문", "hashtags": ["해시태그 3~8개"], "cta": "짧은 행동유도 문구"}
+    if channel_code == CHANNEL_SHORTFORM_SCRIPT:
+        base["voice_script"] = "15~40초 분량의 내레이션 원고(자연스러운 구어체 문장, 최대 1200자)"
+        base["scene_sentences"] = ["장면별로 나눈 자막 문장 목록(문장 하나당 1~2초 분량, 최대 20개)"]
+    return base
+
+
+_CHANNELS_OUTPUT_CONTRACT_HEADER = """출력 형식:
+아래 8개 채널 코드를 모두 포함하는 JSON 객체 하나만 응답하십시오. 채널을 하나도 빠뜨리거나
+추가하지 마십시오. 각 채널은 그 채널의 특성(글자수, 말투, 형식)에 맞게 별도로 작성하고,
+서로 그대로 복사한 것처럼 똑같이 쓰지 마십시오.
+
+{
+  "channels": {
+"""
+
+
+def build_channels_prompt(ctx: PromptContext) -> str:
+    """6B단계: SNS 8채널 + 숏폼 영상원고를 한 번의 응답으로 요청하는 프롬프트."""
+    lines = [_CHANNELS_OUTPUT_CONTRACT_HEADER.rstrip("\n")]
+    for i, code in enumerate(CHANNEL_CODES):
+        comma = "," if i < len(CHANNEL_CODES) - 1 else ""
+        label = CHANNEL_LABELS[code]
+        schema = json.dumps(_channel_slot_schema(code), ensure_ascii=False, indent=6)
+        lines.append(f'    "{code}": {schema}{comma}  // {label}')
+    lines.append("  }\n}")
+    lines.append(
+        "\n모든 문자열 필드는 비어 있으면 안 됩니다. hashtags와 scene_sentences는 문자열 배열이어야 합니다.\n"
+        "shortform_script 채널에는 반드시 voice_script와 scene_sentences를 포함하고, 나머지 7개 채널에는 "
+        "포함하지 않습니다."
+    )
+    contract = "\n".join(lines)
+    return "\n\n".join([_SYSTEM_RULES, _business_context_block(ctx), contract])
+
+
+def build_single_channel_prompt(ctx: PromptContext, channel_code: str) -> str:
+    """6B단계: 채널 하나만 재생성할 때 쓰는 축소 프롬프트. 다른 채널 결과에는 영향을 주지 않는다."""
+    label = CHANNEL_LABELS.get(channel_code, channel_code)
+    schema = json.dumps(_channel_slot_schema(channel_code), ensure_ascii=False, indent=2)
+    contract = (
+        f"출력 형식:\n\"{label}\"({channel_code}) 채널 하나만을 위한 아래 JSON 객체 하나만 응답하십시오.\n\n"
+        f"{schema}\n\n모든 문자열 필드는 비어 있으면 안 됩니다."
+    )
+    return "\n\n".join([_SYSTEM_RULES, _business_context_block(ctx), contract])

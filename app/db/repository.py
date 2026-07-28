@@ -330,6 +330,12 @@ def update_company(company_id: int, user_id: int, fields: dict) -> bool:
         return cur.rowcount > 0
 
 
+def get_company(company_id: int) -> Optional[dict]:
+    with get_readonly_connection() as conn:
+        row = conn.execute("SELECT * FROM companies WHERE id=?", (company_id,)).fetchone()
+        return dict(row) if row else None
+
+
 def get_default_company_for_user(user_id: int) -> Optional[dict]:
     with get_readonly_connection() as conn:
         row = conn.execute(
@@ -660,5 +666,134 @@ def get_latest_generation_result_for_project(project_id: int) -> Optional[dict]:
             WHERE project_id=? ORDER BY id DESC LIMIT 1
             """,
             (project_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+# ---------------------------------------------------------------------------
+# content_channel_results / content_video_scripts (6B단계: SNS 8채널)
+# ---------------------------------------------------------------------------
+def upsert_channel_result(generation_id: int, project_id: int, channel_code: str, fields: dict) -> int:
+    """채널 하나의 결과를 저장한다. 이미 있으면 갱신(재생성 시 다른 7개 채널은 건드리지 않는다).
+    새로 생성/재생성할 때는 항상 original_* 도 같은 값으로 갱신하고 is_edited를 0으로 되돌린다
+    (재생성은 새 AI 결과가 곧 새 원본이 되므로)."""
+    now = _now()
+    hashtags_json = fields.get("hashtags_json", "[]")
+    with get_connection() as conn:
+        existing = conn.execute(
+            "SELECT id FROM content_channel_results WHERE project_id=? AND channel_code=?",
+            (project_id, channel_code),
+        ).fetchone()
+        if existing:
+            conn.execute(
+                """
+                UPDATE content_channel_results SET
+                    generation_id=?, title=?, body=?, hashtags_json=?, cta=?,
+                    original_title=?, original_body=?, original_hashtags_json=?, original_cta=?,
+                    is_edited=0, status='ready', updated_at=?
+                WHERE id=?
+                """,
+                (
+                    generation_id, fields.get("title", ""), fields.get("body", ""), hashtags_json,
+                    fields.get("cta", ""), fields.get("title", ""), fields.get("body", ""),
+                    hashtags_json, fields.get("cta", ""), now, existing["id"],
+                ),
+            )
+            return int(existing["id"])
+        cur = conn.execute(
+            """
+            INSERT INTO content_channel_results
+                (generation_id, project_id, channel_code, title, body, hashtags_json, cta,
+                 original_title, original_body, original_hashtags_json, original_cta,
+                 is_edited, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'ready', ?, ?)
+            """,
+            (
+                generation_id, project_id, channel_code, fields.get("title", ""), fields.get("body", ""),
+                hashtags_json, fields.get("cta", ""), fields.get("title", ""), fields.get("body", ""),
+                hashtags_json, fields.get("cta", ""), now, now,
+            ),
+        )
+        return int(cur.lastrowid)
+
+
+def list_channel_results_for_project(project_id: int) -> list[dict]:
+    with get_readonly_connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM content_channel_results WHERE project_id=?", (project_id,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_channel_result(project_id: int, channel_code: str) -> Optional[dict]:
+    with get_readonly_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM content_channel_results WHERE project_id=? AND channel_code=?",
+            (project_id, channel_code),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def update_channel_result_manual_edit(project_id: int, channel_code: str, title: str, body: str,
+                                       hashtags_json: str, cta: str) -> bool:
+    """소유권 확인은 라우터가 project 조회 시 이미 끝낸 뒤 호출한다(project_id로 스코프됨)."""
+    with get_connection() as conn:
+        cur = conn.execute(
+            """
+            UPDATE content_channel_results SET
+                title=?, body=?, hashtags_json=?, cta=?, is_edited=1, updated_at=?
+            WHERE project_id=? AND channel_code=?
+            """,
+            (title, body, hashtags_json, cta, _now(), project_id, channel_code),
+        )
+        return cur.rowcount > 0
+
+
+def revert_channel_result(project_id: int, channel_code: str) -> bool:
+    with get_connection() as conn:
+        cur = conn.execute(
+            """
+            UPDATE content_channel_results SET
+                title=original_title, body=original_body, hashtags_json=original_hashtags_json,
+                cta=original_cta, is_edited=0, updated_at=?
+            WHERE project_id=? AND channel_code=?
+            """,
+            (_now(), project_id, channel_code),
+        )
+        return cur.rowcount > 0
+
+
+def upsert_video_script(generation_id: int, project_id: int, voice_script: str,
+                         scene_sentences_json: str) -> int:
+    now = _now()
+    with get_connection() as conn:
+        existing = conn.execute(
+            "SELECT id FROM content_video_scripts WHERE project_id=?", (project_id,)
+        ).fetchone()
+        if existing:
+            conn.execute(
+                """
+                UPDATE content_video_scripts SET
+                    generation_id=?, voice_script=?, scene_sentences_json=?, updated_at=?
+                WHERE id=?
+                """,
+                (generation_id, voice_script, scene_sentences_json, now, existing["id"]),
+            )
+            return int(existing["id"])
+        cur = conn.execute(
+            """
+            INSERT INTO content_video_scripts
+                (generation_id, project_id, voice_script, scene_sentences_json, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (generation_id, project_id, voice_script, scene_sentences_json, now, now),
+        )
+        return int(cur.lastrowid)
+
+
+def get_video_script_for_project(project_id: int) -> Optional[dict]:
+    with get_readonly_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM content_video_scripts WHERE project_id=?", (project_id,)
         ).fetchone()
         return dict(row) if row else None
