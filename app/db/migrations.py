@@ -191,12 +191,37 @@ def _migration_004_project_content_fields(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_005_music_catalog(conn: sqlite3.Connection) -> None:
+    """계획서 21번: 배경음악 원본(runtime/music/mp3)의 메타데이터 카탈로그.
+    실제 mp3 바이너리는 저장하지 않고 상대경로와 메타데이터만 저장한다."""
+    conn.executescript(
+        """
+        CREATE TABLE music_catalog (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            filename TEXT NOT NULL,
+            relative_path TEXT NOT NULL UNIQUE,
+            size_bytes INTEGER NOT NULL DEFAULT 0,
+            sha256 TEXT NOT NULL,
+            duration_seconds REAL NOT NULL DEFAULT 0,
+            codec TEXT NOT NULL DEFAULT '',
+            bitrate INTEGER NOT NULL DEFAULT 0,
+            sample_rate INTEGER NOT NULL DEFAULT 0,
+            duplicate_of_id INTEGER REFERENCES music_catalog(id),
+            scanned_at TEXT NOT NULL
+        );
+
+        CREATE INDEX idx_music_catalog_sha256 ON music_catalog(sha256);
+        """
+    )
+
+
 # 순서대로 등록. 이미 적용된 번호는 다시 실행하지 않는다.
 MIGRATIONS: list[Migration] = [
     (1, "initial_schema", _migration_001_initial_schema),
     (2, "auth_tables", _migration_002_auth_tables),
     (3, "companies", _migration_003_companies),
     (4, "project_content_fields", _migration_004_project_content_fields),
+    (5, "music_catalog", _migration_005_music_catalog),
 ]
 
 

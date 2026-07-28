@@ -350,6 +350,76 @@ def list_companies_for_user(user_id: int) -> list[dict]:
         return [dict(r) for r in rows]
 
 
+def get_music_by_relative_path(relative_path: str) -> Optional[dict]:
+    with get_readonly_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM music_catalog WHERE relative_path=?", (relative_path,)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def get_music_id_by_sha256(sha256: str) -> Optional[int]:
+    with get_readonly_connection() as conn:
+        row = conn.execute(
+            "SELECT id FROM music_catalog WHERE sha256=? ORDER BY id LIMIT 1", (sha256,)
+        ).fetchone()
+        return int(row["id"]) if row else None
+
+
+def upsert_music_catalog_entry(fields: dict) -> int:
+    """relative_path 기준으로 있으면 갱신, 없으면 새로 만든다."""
+    with get_connection() as conn:
+        existing = conn.execute(
+            "SELECT id FROM music_catalog WHERE relative_path=?", (fields["relative_path"],)
+        ).fetchone()
+        if existing:
+            conn.execute(
+                """
+                UPDATE music_catalog SET
+                    filename=?, size_bytes=?, sha256=?, duration_seconds=?, codec=?,
+                    bitrate=?, sample_rate=?, duplicate_of_id=?, scanned_at=?
+                WHERE id=?
+                """,
+                (
+                    fields["filename"], fields["size_bytes"], fields["sha256"],
+                    fields["duration_seconds"], fields["codec"], fields["bitrate"],
+                    fields["sample_rate"], fields.get("duplicate_of_id"), fields["scanned_at"],
+                    existing["id"],
+                ),
+            )
+            return int(existing["id"])
+        cur = conn.execute(
+            """
+            INSERT INTO music_catalog
+                (filename, relative_path, size_bytes, sha256, duration_seconds, codec,
+                 bitrate, sample_rate, duplicate_of_id, scanned_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                fields["filename"], fields["relative_path"], fields["size_bytes"],
+                fields["sha256"], fields["duration_seconds"], fields["codec"],
+                fields["bitrate"], fields["sample_rate"], fields.get("duplicate_of_id"),
+                fields["scanned_at"],
+            ),
+        )
+        return int(cur.lastrowid)
+
+
+def list_music_catalog(exclude_duplicates: bool = True) -> list[dict]:
+    with get_readonly_connection() as conn:
+        sql = "SELECT * FROM music_catalog"
+        if exclude_duplicates:
+            sql += " WHERE duplicate_of_id IS NULL"
+        sql += " ORDER BY filename"
+        return [dict(r) for r in conn.execute(sql).fetchall()]
+
+
+def count_music_catalog() -> int:
+    with get_readonly_connection() as conn:
+        row = conn.execute("SELECT COUNT(*) FROM music_catalog").fetchone()
+        return int(row[0])
+
+
 def count_audit_logs() -> int:
     with get_readonly_connection() as conn:
         row = conn.execute("SELECT COUNT(*) FROM audit_logs").fetchone()

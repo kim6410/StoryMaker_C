@@ -24,6 +24,11 @@ BACKUPS_DIR = PROJECT_ROOT / "backups"
 # runtime/music/mp3를 읽기 전용으로 그대로 참조한다.
 MUSIC_LIBRARY_DIR = PROJECT_ROOT / "runtime" / "music" / "mp3"
 
+# 미디어 처리 실행 파일은 시스템 전역 PATH에 의존하지 않고 프로젝트 전용 경로를 사용한다.
+FFMPEG_DIR = PROJECT_ROOT / "runtime" / "ffmpeg" / "bin"
+FFPROBE_PATH = FFMPEG_DIR / "ffprobe.exe"
+FFMPEG_PATH = FFMPEG_DIR / "ffmpeg.exe"
+
 DB_PATH = DATA_DIR / "storymaker_claude.db"
 
 for _d in (DATA_DIR, JOBS_DIR, MEDIA_DIR, LOGS_DIR, BACKUPS_DIR):

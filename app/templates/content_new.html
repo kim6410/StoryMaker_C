@@ -71,7 +71,7 @@
       <select name="music_relative_path" id="music-select">
         <option value="">사용 안 함</option>
         {% for m in music_items %}
-        <option value="{{ m.relative_path }}">{{ m.name }} ({{ m.size_mb }}MB)</option>
+        <option value="{{ m.relative_path }}">{{ m.name }} ({{ (m.duration_seconds // 60) | int }}:{{ '%02d' | format(m.duration_seconds % 60) }})</option>
         {% endfor %}
       </select>
     </div>
