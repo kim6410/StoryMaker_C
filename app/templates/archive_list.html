@@ -16,7 +16,7 @@
 {% if items %}
 <div class="grid cols-3">
   {% for item in items %}
-  <a class="card" href="/archive/{{ item.id }}?role={{ role_switch }}" style="display:block">
+  <a class="card" href="/archive/{{ item.id }}" style="display:block">
     <div style="aspect-ratio:9/16;border-radius:10px;background:linear-gradient(160deg,#1b2740,#0e1526);margin-bottom:10px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:12px">썸네일</div>
     <b>{{ item.title }}</b>
     <div style="color:var(--muted);font-size:12px;margin:6px 0">{{ item.company }} · {{ item.created_at }}</div>

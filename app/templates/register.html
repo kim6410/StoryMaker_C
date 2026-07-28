@@ -2,25 +2,26 @@
 {% block title %}회원가입 - {{ app_name }}{% endblock %}
 {% block content %}
 <div class="auth-sub">이메일 인증 후 바로 시작할 수 있습니다.</div>
-<div class="field">
-  <label>이름 또는 닉네임</label>
-  <input type="text" placeholder="홍길동">
-</div>
-<div class="field">
-  <label>이메일</label>
-  <input type="email" placeholder="example@company.com">
-</div>
-<div class="field">
-  <label>비밀번호</label>
-  <input type="password" placeholder="8자 이상">
-</div>
-<div class="field">
-  <label>비밀번호 확인</label>
-  <input type="password" placeholder="비밀번호 재입력">
-</div>
-<label style="display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12px;margin-bottom:16px">
-  <input type="checkbox" checked disabled> 이용약관 및 개인정보 처리방침에 동의합니다
-</label>
-<a class="btn" href="/verify-email" data-once>인증 메일 받기 (샘플)</a>
+{% if error %}
+<div class="card" style="border-color:var(--danger);color:var(--danger);font-size:13px;margin-bottom:14px">{{ error }}</div>
+{% endif %}
+<form method="post" action="/auth/register">
+  <div class="field">
+    <label>이름 또는 닉네임</label>
+    <input type="text" name="display_name" placeholder="홍길동">
+  </div>
+  <div class="field">
+    <label>이메일</label>
+    <input type="email" name="email" placeholder="example@company.com" required>
+  </div>
+  <div class="field">
+    <label>비밀번호</label>
+    <input type="password" name="password" placeholder="8자 이상" minlength="8" required>
+  </div>
+  <label style="display:flex;align-items:center;gap:6px;color:var(--muted);font-size:12px;margin-bottom:16px">
+    <input type="checkbox" checked disabled> 이용약관 및 개인정보 처리방침에 동의합니다
+  </label>
+  <button class="btn" type="submit">인증 메일 받기</button>
+</form>
 <div class="auth-switch">이미 계정이 있으신가요? <a class="btn ghost" href="/login">로그인</a></div>
 {% endblock %}

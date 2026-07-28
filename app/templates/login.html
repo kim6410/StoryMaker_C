@@ -2,19 +2,40 @@
 {% block title %}로그인 - {{ app_name }}{% endblock %}
 {% block content %}
 <div class="auth-sub">사업자를 위한 SNS 콘텐츠 자동 제작 서비스</div>
-<div class="field">
-  <label>아이디 또는 이메일</label>
-  <input type="text" placeholder="example@company.com" value="kim@example.com" readonly>
-</div>
-<div class="field">
-  <label>비밀번호</label>
-  <input type="password" placeholder="비밀번호 입력" value="••••••••" readonly>
-</div>
-<div class="auth-links">
-  <label style="display:flex;align-items:center;gap:6px;color:var(--muted)"><input type="checkbox" checked disabled> 로그인 상태 유지</label>
-  <a class="btn ghost" href="/forgot-password">비밀번호 찾기</a>
-</div>
-<a class="btn" style="margin-top:16px" href="/dashboard?role=user" data-once>로그인 (샘플)</a>
-<a class="btn secondary" style="margin-top:10px" href="/dashboard?role=admin" data-once>관리자로 로그인 (샘플)</a>
+
+{% if error %}
+<div class="card" style="border-color:var(--danger);color:var(--danger);font-size:13px;margin-bottom:14px">{{ error }}</div>
+{% endif %}
+{% if verified %}
+<div class="card" style="border-color:var(--ok);color:var(--ok);font-size:13px;margin-bottom:14px">이메일 인증이 완료됐습니다. 로그인해 주세요.</div>
+{% endif %}
+{% if verify_failed %}
+<div class="card" style="border-color:var(--danger);color:var(--danger);font-size:13px;margin-bottom:14px">인증 링크가 만료되었거나 이미 사용된 링크입니다.</div>
+{% endif %}
+{% if reset %}
+<div class="card" style="border-color:var(--ok);color:var(--ok);font-size:13px;margin-bottom:14px">비밀번호가 재설정됐습니다. 새 비밀번호로 로그인해 주세요.</div>
+{% endif %}
+{% if logged_out %}
+<div class="card" style="font-size:13px;margin-bottom:14px;color:var(--muted)">로그아웃되었습니다.</div>
+{% endif %}
+{% if password_changed %}
+<div class="card" style="border-color:var(--ok);color:var(--ok);font-size:13px;margin-bottom:14px">비밀번호가 변경되어 모든 기기에서 로그아웃되었습니다. 새 비밀번호로 다시 로그인해 주세요.</div>
+{% endif %}
+
+<form method="post" action="/auth/login">
+  <div class="field">
+    <label>이메일</label>
+    <input type="email" name="email" placeholder="example@company.com" required>
+  </div>
+  <div class="field">
+    <label>비밀번호</label>
+    <input type="password" name="password" placeholder="비밀번호 입력" required>
+  </div>
+  <div class="auth-links">
+    <span></span>
+    <a class="btn ghost" href="/forgot-password">비밀번호 찾기</a>
+  </div>
+  <button class="btn" style="margin-top:16px" type="submit">로그인</button>
+</form>
 <div class="auth-switch">아직 계정이 없으신가요? <a class="btn ghost" href="/register">회원가입</a></div>
 {% endblock %}

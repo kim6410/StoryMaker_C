@@ -6,9 +6,13 @@ StoryMaker Claude Lab 중앙 설정 모듈.
 """
 from __future__ import annotations
 from pathlib import Path
+from dotenv import load_dotenv
 
 # app/config.py -> app/ -> 프로젝트 루트
 PROJECT_ROOT: Path = Path(__file__).resolve().parent.parent
+
+# 공용 환경설정 파일 위치(config/.env). 다른 세션과 공유하는 단일 설정 파일이다.
+load_dotenv(PROJECT_ROOT / "config" / ".env")
 
 DATA_DIR = PROJECT_ROOT / "data"
 JOBS_DIR = DATA_DIR / "jobs"

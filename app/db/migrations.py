@@ -107,9 +107,51 @@ def _migration_001_initial_schema(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_002_auth_tables(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE sessions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_token_hash TEXT NOT NULL UNIQUE,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            last_seen_at TEXT NOT NULL,
+            revoked_at TEXT,
+            ip_address TEXT,
+            user_agent TEXT
+        );
+
+        CREATE TABLE email_verification_tokens (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            token_hash TEXT NOT NULL UNIQUE,
+            expires_at TEXT NOT NULL,
+            consumed_at TEXT,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE TABLE password_reset_tokens (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            token_hash TEXT NOT NULL UNIQUE,
+            expires_at TEXT NOT NULL,
+            consumed_at TEXT,
+            created_at TEXT NOT NULL
+        );
+
+        CREATE INDEX idx_sessions_user ON sessions(user_id);
+        CREATE INDEX idx_sessions_expires ON sessions(expires_at);
+        CREATE INDEX idx_email_verif_user ON email_verification_tokens(user_id);
+        CREATE INDEX idx_pw_reset_user ON password_reset_tokens(user_id);
+        """
+    )
+
+
 # 순서대로 등록. 이미 적용된 번호는 다시 실행하지 않는다.
 MIGRATIONS: list[Migration] = [
     (1, "initial_schema", _migration_001_initial_schema),
+    (2, "auth_tables", _migration_002_auth_tables),
 ]
 
 

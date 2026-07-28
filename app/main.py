@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-StoryMaker Claude Lab - 1단계: 클릭 가능한 웹앱 껍데기
-- 실제 DB, AI API, 음성, MP4 렌더링은 아직 연결하지 않는다.
-- 모든 데이터는 샘플 데이터이며 새로고침해도 항상 같은 값을 보여준다.
+StoryMaker Claude Lab - 3단계: 회원가입/로그인/세션을 자체 DB로 실제 동작시킨다.
+- WordPress는 아직 실제로 연결하지 않는다(app/auth/providers.py 참고).
+- AI API, 음성, MP4 렌더링 등은 여전히 연결하지 않는다.
 - 기존 StoryMaker V1/Beta 소스코드는 이 프로젝트에서 참고하지 않았다.
 """
 from __future__ import annotations
@@ -16,26 +16,29 @@ from datetime import datetime, timezone
 
 from app.db.migrations import run_migrations
 from app.db.connection import integrity_check, current_journal_mode
+from app.auth.routes import router as auth_router
+from app.auth.dependencies import get_optional_user
 
 APP_ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = APP_ROOT.parent
 
-app = FastAPI(title="StoryMaker Claude Lab", version="0.2.0-db")
+app = FastAPI(title="StoryMaker Claude Lab", version="0.3.0-auth")
+app.mount("/static", StaticFiles(directory=APP_ROOT / "static"), name="static")
+templates = Jinja2Templates(directory=APP_ROOT / "templates")
+app.include_router(auth_router)
 
 
 @app.on_event("startup")
 def _startup_run_migrations() -> None:
-    """2단계: 앱 기동 시 DB 스키마 마이그레이션을 자동 적용한다."""
     newly_applied = run_migrations()
     if newly_applied:
         print(f"[db] applied migrations: {newly_applied}")
     else:
         print("[db] schema already up to date")
-app.mount("/static", StaticFiles(directory=APP_ROOT / "static"), name="static")
-templates = Jinja2Templates(directory=APP_ROOT / "templates")
+
 
 # ---------------------------------------------------------------------------
-# 사이드 메뉴 구성 (일반 사용자 / 관리자 분리)
+# 사이드 메뉴 구성
 # ---------------------------------------------------------------------------
 USER_MENU = [
     {"key": "dashboard", "label": "대시보드", "href": "/dashboard", "icon": "grid"},
@@ -49,6 +52,8 @@ ADMIN_MENU = [
     {"key": "admin_requests", "label": "요청사항 관리", "href": "/admin/requests", "icon": "inbox"},
 ]
 
+# 3단계에서는 콘텐츠 제작·보관함 화면을 아직 실제 DB와 연결하지 않으므로
+# 화면 자체는 1단계와 동일한 샘플 데이터를 계속 사용한다(다음 단계 범위).
 SAMPLE_CHANNELS = [
     {"key": "naver_blog", "name": "네이버 블로그", "title": "강북구 사장님이 추천하는 겨울철 보일러 점검 꿀팁", "body": "안녕하세요, 오박사만능설비입니다. 요즘처럼 기온이 뚝 떨어지는 시기에는 보일러 점검이 특히 중요한데요...", "hashtags": "#강북구보일러 #보일러점검 #겨울철난방"},
     {"key": "naver_place", "name": "네이버 플레이스", "title": "오박사만능설비 - 강북구 보일러 전문", "body": "강북구 전 지역 출장 가능, 당일 방문 점검 가능합니다.", "hashtags": "#출장수리 #당일방문"},
@@ -61,33 +66,9 @@ SAMPLE_CHANNELS = [
 ]
 
 SAMPLE_ARCHIVE_ITEMS = [
-    {
-        "id": "job-sample-0001",
-        "title": "겨울철 보일러 점검 콘텐츠",
-        "company": "오박사만능설비",
-        "created_at": "2026-07-27 14:20",
-        "status": "완료",
-        "media": ["이미지 4장", "음성", "자막", "MP4", "썸네일"],
-        "size": "38.2MB",
-    },
-    {
-        "id": "job-sample-0002",
-        "title": "여름철 에어컨 청소 안내",
-        "company": "오박사만능설비",
-        "created_at": "2026-07-25 09:05",
-        "status": "완료",
-        "media": ["이미지 3장", "음성", "자막", "MP4", "썸네일"],
-        "size": "29.7MB",
-    },
-    {
-        "id": "job-sample-0003",
-        "title": "강북구 배관 누수 출장 후기",
-        "company": "오박사만능설비",
-        "created_at": "2026-07-20 18:41",
-        "status": "완료",
-        "media": ["이미지 5장", "음성", "자막", "MP4", "썸네일"],
-        "size": "41.0MB",
-    },
+    {"id": "job-sample-0001", "title": "겨울철 보일러 점검 콘텐츠", "company": "오박사만능설비", "created_at": "2026-07-27 14:20", "status": "완료", "media": ["이미지 4장", "음성", "자막", "MP4", "썸네일"], "size": "38.2MB"},
+    {"id": "job-sample-0002", "title": "여름철 에어컨 청소 안내", "company": "오박사만능설비", "created_at": "2026-07-25 09:05", "status": "완료", "media": ["이미지 3장", "음성", "자막", "MP4", "썸네일"], "size": "29.7MB"},
+    {"id": "job-sample-0003", "title": "강북구 배관 누수 출장 후기", "company": "오박사만능설비", "created_at": "2026-07-20 18:41", "status": "완료", "media": ["이미지 5장", "음성", "자막", "MP4", "썸네일"], "size": "41.0MB"},
 ]
 
 SAMPLE_ARCHIVE_DETAIL = {
@@ -106,12 +87,6 @@ SAMPLE_ARCHIVE_DETAIL = {
     }
 }
 
-SAMPLE_MEMBERS = [
-    {"id": 1, "name": "김사장", "email": "kim***@example.com", "company": "오박사만능설비", "role": "user", "plan": "무료", "period": "-", "usage": "3 / 20", "last_login": "2026-07-28 09:12", "status": "활성"},
-    {"id": 2, "name": "박대표", "email": "park***@example.com", "company": "청솔카페", "role": "user", "plan": "Starter", "period": "2026-07-01 ~ 2026-07-31", "usage": "14 / 20", "last_login": "2026-07-28 08:03", "status": "활성"},
-    {"id": 3, "name": "이관리자", "email": "admin***@example.com", "company": "-", "role": "admin", "plan": "관리자", "period": "-", "usage": "무제한", "last_login": "2026-07-28 10:40", "status": "활성"},
-]
-
 SAMPLE_REQUESTS = [
     {"id": 101, "title": "썸네일 템플릿 색상 추가 요청", "importance": "보통", "status": "검토", "created_at": "2026-07-26"},
     {"id": 102, "title": "네이버 블로그 서식 복사가 안 돼요", "importance": "높음", "status": "진행", "created_at": "2026-07-27"},
@@ -119,16 +94,8 @@ SAMPLE_REQUESTS = [
 ]
 
 
-def _sample_user(role: str) -> dict:
-    if role == "admin":
-        return {"name": "이관리자", "email": "admin@example.com", "role": "admin", "company": "-"}
-    return {"name": "김사장", "email": "kim@example.com", "role": "user", "company": "오박사만능설비"}
-
-
-def _ctx(request: Request, *, active: str = "", role: str = "user", **extra) -> dict:
-    """모든 인증 후 화면에서 공통으로 쓰는 템플릿 컨텍스트."""
-    user = _sample_user(role)
-    admin_menu = ADMIN_MENU if user["role"] == "admin" else []
+def _ctx(request: Request, user: dict, *, active: str = "", **extra) -> dict:
+    admin_menu = ADMIN_MENU if str(user.get("role")) == "admin" else []
     return {
         "request": request,
         "app_name": "StoryMaker Claude Lab",
@@ -136,111 +103,166 @@ def _ctx(request: Request, *, active: str = "", role: str = "user", **extra) -> 
         "user_menu": USER_MENU,
         "admin_menu": admin_menu,  # 관리자가 아니면 서버에서부터 빈 리스트 -> DOM 자체가 생성되지 않음
         "active": active,
-        "role_switch": role,
         "now": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC"),
         **extra,
     }
 
 
+def _require_login_or_redirect(request: Request):
+    """로그인 안 됐으면 /login으로 보낸다. 로그인 됐으면 사용자 dict를 반환한다."""
+    user = get_optional_user(request)
+    if not user:
+        return None
+    return user
+
+
 # ---------------------------------------------------------------------------
-# 인증 전 화면 (레이아웃 별도, 사이드 메뉴 없음)
+# 인증 전 화면
 # ---------------------------------------------------------------------------
 @app.get("/")
-def root():
+def root(request: Request):
+    if get_optional_user(request):
+        return RedirectResponse(url="/dashboard")
     return RedirectResponse(url="/login")
 
 
 @app.get("/login")
-def login_page(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request, "app_name": "StoryMaker Claude Lab"})
+def login_page(request: Request, error: str = "", verified: int = 0, verify_failed: int = 0,
+               reset: int = 0, logged_out: int = 0, password_changed: int = 0):
+    if get_optional_user(request):
+        return RedirectResponse(url="/dashboard")
+    return templates.TemplateResponse("login.html", {
+        "request": request, "app_name": "StoryMaker Claude Lab",
+        "error": error, "verified": verified, "verify_failed": verify_failed,
+        "reset": reset, "logged_out": logged_out, "password_changed": password_changed,
+    })
 
 
 @app.get("/register")
-def register_page(request: Request):
-    return templates.TemplateResponse("register.html", {"request": request, "app_name": "StoryMaker Claude Lab"})
+def register_page(request: Request, error: str = ""):
+    if get_optional_user(request):
+        return RedirectResponse(url="/dashboard")
+    return templates.TemplateResponse("register.html", {"request": request, "app_name": "StoryMaker Claude Lab", "error": error})
 
 
 @app.get("/verify-email")
-def verify_email_page(request: Request):
-    return templates.TemplateResponse("verify_email.html", {"request": request, "app_name": "StoryMaker Claude Lab", "sample_email": "kim***@example.com"})
+def verify_email_page(request: Request, email: str = "", dev_link: str = ""):
+    return templates.TemplateResponse("verify_email.html", {
+        "request": request, "app_name": "StoryMaker Claude Lab", "email": email, "dev_link": dev_link,
+    })
 
 
 @app.get("/forgot-password")
-def forgot_password_page(request: Request):
-    return templates.TemplateResponse("forgot_password.html", {"request": request, "app_name": "StoryMaker Claude Lab"})
+def forgot_password_page(request: Request, error: str = "", sent: int = 0, dev_link: str = "", expired: int = 0):
+    return templates.TemplateResponse("forgot_password.html", {
+        "request": request, "app_name": "StoryMaker Claude Lab",
+        "error": error, "sent": sent, "dev_link": dev_link, "expired": expired,
+    })
 
 
 # ---------------------------------------------------------------------------
-# 인증 후 화면 (공통 레이아웃 + 사이드 메뉴)
-# role 쿼리 파라미터는 이번 껍데기 단계에서만 데모용으로 존재한다.
-# 실제 권한 분기는 3단계에서 서버 세션 기반으로 다시 구현한다.
+# 인증 후 화면 (실제 세션 필요, 없으면 로그인으로 리다이렉트)
 # ---------------------------------------------------------------------------
 @app.get("/dashboard")
-def dashboard_page(request: Request, role: str = "user"):
-    return templates.TemplateResponse("dashboard.html", _ctx(request, active="dashboard", role=role, recent=SAMPLE_ARCHIVE_ITEMS[:3]))
+def dashboard_page(request: Request):
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    return templates.TemplateResponse("dashboard.html", _ctx(request, user, active="dashboard", recent=SAMPLE_ARCHIVE_ITEMS[:3]))
 
 
 @app.get("/content/new")
-def content_new_page(request: Request, role: str = "user"):
-    return templates.TemplateResponse("content_new.html", _ctx(request, active="content_new", role=role))
+def content_new_page(request: Request):
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    return templates.TemplateResponse("content_new.html", _ctx(request, user, active="content_new"))
 
 
 @app.get("/content/channels")
-def content_channels_page(request: Request, role: str = "user"):
-    return templates.TemplateResponse("content_channels.html", _ctx(request, active="content_new", role=role, channels=SAMPLE_CHANNELS))
+def content_channels_page(request: Request):
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    return templates.TemplateResponse("content_channels.html", _ctx(request, user, active="content_new", channels=SAMPLE_CHANNELS))
 
 
 @app.get("/content/media")
-def content_media_page(request: Request, role: str = "user"):
-    return templates.TemplateResponse("content_media.html", _ctx(request, active="content_new", role=role))
+def content_media_page(request: Request):
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    return templates.TemplateResponse("content_media.html", _ctx(request, user, active="content_new"))
 
 
 @app.get("/content/thumbnail")
-def content_thumbnail_page(request: Request, role: str = "user"):
-    return templates.TemplateResponse("content_thumbnail.html", _ctx(request, active="content_new", role=role, candidates=list(range(1, 9))))
+def content_thumbnail_page(request: Request):
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    return templates.TemplateResponse("content_thumbnail.html", _ctx(request, user, active="content_new", candidates=list(range(1, 9))))
 
 
 @app.get("/archive")
-def archive_list_page(request: Request, role: str = "user"):
-    return templates.TemplateResponse("archive_list.html", _ctx(request, active="archive", role=role, items=SAMPLE_ARCHIVE_ITEMS))
+def archive_list_page(request: Request):
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    return templates.TemplateResponse("archive_list.html", _ctx(request, user, active="archive", items=SAMPLE_ARCHIVE_ITEMS))
 
 
 @app.get("/archive/{item_id}")
-def archive_detail_page(request: Request, item_id: str, role: str = "user"):
+def archive_detail_page(request: Request, item_id: str):
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login")
     detail = SAMPLE_ARCHIVE_DETAIL.get(item_id, SAMPLE_ARCHIVE_DETAIL["job-sample-0001"])
-    return templates.TemplateResponse("archive_detail.html", _ctx(request, active="archive", role=role, item_id=item_id, detail=detail))
+    return templates.TemplateResponse("archive_detail.html", _ctx(request, user, active="archive", item_id=item_id, detail=detail))
 
 
 @app.get("/mypage")
-def mypage_page(request: Request, role: str = "user"):
-    return templates.TemplateResponse("mypage.html", _ctx(request, active="mypage", role=role))
+def mypage_page(request: Request, error: str = ""):
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    return templates.TemplateResponse("mypage.html", _ctx(request, user, active="mypage", error=error))
 
 
 @app.get("/subscription")
-def subscription_page(request: Request, role: str = "user"):
-    return templates.TemplateResponse("subscription.html", _ctx(request, active="subscription", role=role))
+def subscription_page(request: Request):
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    return templates.TemplateResponse("subscription.html", _ctx(request, user, active="subscription"))
 
 
 @app.get("/admin/members")
-def admin_members_page(request: Request, role: str = "admin"):
-    if role != "admin":
-        return RedirectResponse(url="/dashboard?role=user")
-    return templates.TemplateResponse("admin_members.html", _ctx(request, active="admin_members", role=role, members=SAMPLE_MEMBERS))
+def admin_members_page(request: Request):
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    if str(user.get("role")) != "admin":
+        return RedirectResponse(url="/dashboard")
+    from app.db import repository as repo
+    members = repo.list_users(limit=200)
+    return templates.TemplateResponse("admin_members.html", _ctx(request, user, active="admin_members", members=members))
 
 
 @app.get("/admin/requests")
-def admin_requests_page(request: Request, role: str = "admin"):
-    if role != "admin":
-        return RedirectResponse(url="/dashboard?role=user")
-    return templates.TemplateResponse("admin_requests.html", _ctx(request, active="admin_requests", role=role, requests=SAMPLE_REQUESTS))
+def admin_requests_page(request: Request):
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login")
+    if str(user.get("role")) != "admin":
+        return RedirectResponse(url="/dashboard")
+    return templates.TemplateResponse("admin_requests.html", _ctx(request, user, active="admin_requests", requests=SAMPLE_REQUESTS))
 
 
 @app.get("/healthz")
 def healthz():
-    """단계 15에서 정식 상태 API로 확장 예정. 지금은 DB 상태까지만 포함한다."""
     return {
         "ok": True,
-        "stage": "2-db",
+        "stage": "3-auth",
         "time": datetime.now(timezone.utc).isoformat(),
         "db_integrity": integrity_check(),
         "db_journal_mode": current_journal_mode(),

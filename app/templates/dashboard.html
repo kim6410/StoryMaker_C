@@ -2,7 +2,7 @@
 {% block title %}대시보드 - {{ app_name }}{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1>안녕하세요, {{ user.name }}님</h1>
+  <h1>안녕하세요, {{ user.display_name or user.email }}님</h1>
   <p>오늘도 빠르게 SNS 콘텐츠를 만들어 보세요.</p>
 </div>
 
@@ -17,7 +17,7 @@
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
     <h3 style="margin:0">빠른 시작</h3>
   </div>
-  <a class="btn" style="width:auto;padding:0 20px" href="/content/new?role={{ role_switch }}">+ 새 콘텐츠 제작 시작</a>
+  <a class="btn" style="width:auto;padding:0 20px" href="/content/new">+ 새 콘텐츠 제작 시작</a>
 </div>
 
 <div class="card" style="margin-top:16px">
@@ -32,7 +32,7 @@
         <td>{{ item.company }}</td>
         <td>{{ item.created_at }}</td>
         <td><span class="badge ok">{{ item.status }}</span></td>
-        <td><a class="btn ghost" href="/archive/{{ item.id }}?role={{ role_switch }}">상세 보기</a></td>
+        <td><a class="btn ghost" href="/archive/{{ item.id }}">상세 보기</a></td>
       </tr>
       {% endfor %}
     </tbody>

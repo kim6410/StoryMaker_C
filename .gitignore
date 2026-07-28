@@ -8,3 +8,7 @@ backups/
 *.db-wal
 *.db-shm
 .env
+config/.env
+config/*.secret
+!config/.env.example
+imports/

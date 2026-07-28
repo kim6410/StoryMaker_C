@@ -14,33 +14,30 @@
       <a class="brand" href="/dashboard">StoryMaker <span style="color:var(--accent)">Claude Lab</span></a>
     </div>
     <div class="topbar-right">
-      <div class="role-switch" title="1단계 껍데기 데모 전용 - 실제 권한 분기 아님">
-        역할 데모:
-        <a href="?role=user" class="{{ 'active' if role_switch=='user' else '' }}">일반</a>
-        <a href="?role=admin" class="{{ 'active' if role_switch=='admin' else '' }}">관리자</a>
-      </div>
       <div class="bell" data-toast-msg="새 알림이 없습니다. (샘플)">
         🔔<span class="dot"></span>
       </div>
       <div class="user-chip">
-        <span class="only-desktop">{{ user.company if user.company != '-' else '관리자' }} ·</span>
-        <b>{{ user.name }}</b>
+        <span class="only-desktop">{{ '관리자' if user.role == 'admin' else (user.display_name or '') }} ·</span>
+        <b>{{ user.email }}</b>
       </div>
-      <a class="btn secondary" style="width:auto;height:36px;padding:0 14px" href="/login">로그아웃</a>
+      <form method="post" action="/auth/logout" style="margin:0">
+        <button class="btn secondary" type="submit" style="width:auto;height:36px;padding:0 14px">로그아웃</button>
+      </form>
     </div>
   </header>
 
   <nav class="sidebar" data-sidebar>
     <div class="nav-group-title">메뉴</div>
     {% for item in user_menu %}
-    <a class="nav-item {{ 'active' if active == item.key else '' }}" href="{{ item.href }}?role={{ role_switch }}">
+    <a class="nav-item {{ 'active' if active == item.key else '' }}" href="{{ item.href }}">
       <span class="nav-icon">•</span>{{ item.label }}
     </a>
     {% endfor %}
     {% if admin_menu %}
     <div class="nav-group-title">관리자</div>
     {% for item in admin_menu %}
-    <a class="nav-item admin {{ 'active' if active == item.key else '' }}" href="{{ item.href }}?role={{ role_switch }}">
+    <a class="nav-item admin {{ 'active' if active == item.key else '' }}" href="{{ item.href }}">
       <span class="nav-icon">•</span>{{ item.label }}
     </a>
     {% endfor %}
@@ -51,7 +48,7 @@
   <main class="content">
     {% block content %}{% endblock %}
     <footer class="demo-note">
-      1단계 껍데기 화면입니다. 표시되는 모든 데이터는 샘플이며, 실제 AI·WordPress·DB 회원정보·음성·MP4 기능은 아직 연결되지 않았습니다. 상단 "역할 데모"로 일반/관리자 메뉴 차이를 확인할 수 있습니다.
+      3단계: 회원가입·로그인·세션이 이 프로젝트 자체 DB로 실제 동작합니다. 콘텐츠 제작·보관함 화면은 아직 샘플 데이터입니다. WordPress·AI·음성·MP4 기능은 아직 연결되지 않았습니다.
     </footer>
   </main>
 </div>

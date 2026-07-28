@@ -255,3 +255,139 @@ def count_audit_logs() -> int:
     with get_readonly_connection() as conn:
         row = conn.execute("SELECT COUNT(*) FROM audit_logs").fetchone()
         return int(row[0])
+
+
+def update_user_password(user_id: int, password_hash: str) -> None:
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE users SET password_hash=?, updated_at=? WHERE id=?",
+            (password_hash, _now(), user_id),
+        )
+
+
+def mark_user_email_verified(user_id: int) -> None:
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE users SET email_verified=1, updated_at=? WHERE id=?", (_now(), user_id)
+        )
+
+
+def update_user_last_login(user_id: int) -> None:
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE users SET last_login_at=?, updated_at=? WHERE id=?", (_now(), _now(), user_id)
+        )
+
+
+# ---------------------------------------------------------------------------
+# sessions
+# ---------------------------------------------------------------------------
+def create_session(user_id: int, token_hash: str, expires_at: str,
+                    ip_address: str = "", user_agent: str = "") -> int:
+    now = _now()
+    with get_connection() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO sessions (session_token_hash, user_id, created_at, expires_at, last_seen_at, ip_address, user_agent)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (token_hash, user_id, now, expires_at, now, ip_address, user_agent),
+        )
+        return int(cur.lastrowid)
+
+
+def get_active_session_by_token_hash(token_hash: str) -> Optional[dict]:
+    with get_readonly_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT * FROM sessions
+            WHERE session_token_hash=? AND revoked_at IS NULL AND expires_at > ?
+            """,
+            (token_hash, _now()),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def touch_session(session_id: int) -> None:
+    with get_connection() as conn:
+        conn.execute("UPDATE sessions SET last_seen_at=? WHERE id=?", (_now(), session_id))
+
+
+def revoke_session(token_hash: str) -> None:
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE sessions SET revoked_at=? WHERE session_token_hash=? AND revoked_at IS NULL",
+            (_now(), token_hash),
+        )
+
+
+def revoke_all_sessions_for_user(user_id: int) -> None:
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE sessions SET revoked_at=? WHERE user_id=? AND revoked_at IS NULL",
+            (_now(), user_id),
+        )
+
+
+# ---------------------------------------------------------------------------
+# email_verification_tokens / password_reset_tokens
+# ---------------------------------------------------------------------------
+def create_email_verification_token(user_id: int, token_hash: str, expires_at: str) -> int:
+    now = _now()
+    with get_connection() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO email_verification_tokens (user_id, token_hash, expires_at, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (user_id, token_hash, expires_at, now),
+        )
+        return int(cur.lastrowid)
+
+
+def consume_email_verification_token(token_hash: str) -> Optional[int]:
+    """유효하면 소비 처리하고 user_id를 반환, 아니면 None."""
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT id, user_id FROM email_verification_tokens
+            WHERE token_hash=? AND consumed_at IS NULL AND expires_at > ?
+            """,
+            (token_hash, _now()),
+        ).fetchone()
+        if not row:
+            return None
+        conn.execute(
+            "UPDATE email_verification_tokens SET consumed_at=? WHERE id=?", (_now(), row["id"])
+        )
+        return int(row["user_id"])
+
+
+def create_password_reset_token(user_id: int, token_hash: str, expires_at: str) -> int:
+    now = _now()
+    with get_connection() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO password_reset_tokens (user_id, token_hash, expires_at, created_at)
+            VALUES (?, ?, ?, ?)
+            """,
+            (user_id, token_hash, expires_at, now),
+        )
+        return int(cur.lastrowid)
+
+
+def consume_password_reset_token(token_hash: str) -> Optional[int]:
+    with get_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT id, user_id FROM password_reset_tokens
+            WHERE token_hash=? AND consumed_at IS NULL AND expires_at > ?
+            """,
+            (token_hash, _now()),
+        ).fetchone()
+        if not row:
+            return None
+        conn.execute(
+            "UPDATE password_reset_tokens SET consumed_at=? WHERE id=?", (_now(), row["id"])
+        )
+        return int(row["user_id"])
