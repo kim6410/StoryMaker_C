@@ -232,6 +232,7 @@ def create_content_job(
     voice_preference: str = Form("female"),
     company_id: int = Form(0),
     media_ids: list[int] = Form([]),
+    new_media_files: list[UploadFile] = File([]),
 ):
     import json
     user = _require_login_or_redirect(request)
@@ -253,15 +254,19 @@ def create_content_job(
     if music_relative_path and not resolve_music_path(music_relative_path):
         music_relative_path = ""
 
+    # 이 화면에서 바로 새로 업로드한 파일이 있으면 먼저 업체 미디어로 저장한다(마이페이지
+    # 업체관리를 먼저 들르지 않아도 바로 사진을 올릴 수 있게).
+    new_media_ids, _saved, _skipped = _save_company_media_files(company, new_media_files)
+
     # 선택한 미디어가 실제로 이 업체 소유인지 다시 확인한다(다른 업체 미디어 ID를
     # 임의로 붙여넣는 것을 방지). 아직 영상 제작 파이프라인이 실제 사진을 장면
     # 배경으로 쓰지는 않으므로(그라디언트 장면 유지, 단계8 계약 보존), 여기서는
     # 스냅샷에 참조만 남겨 다음 단계 확장에 대비한다(미완료 항목 - 업무일지에 기록).
     owned_media_ids = {m["id"] for m in repo.list_company_media(company["id"])}
-    selected_media_ids = [mid for mid in media_ids if mid in owned_media_ids]
+    selected_media_ids = [mid for mid in media_ids if mid in owned_media_ids] + new_media_ids
     if not selected_media_ids:
         return RedirectResponse(
-            url=f"/content/new?company_id={company['id']}&error=사진%2F영상을+1개+이상+선택해+주세요.",
+            url=f"/content/new?company_id={company['id']}&error=사진%2F영상을+1개+이상+선택하거나+업로드해+주세요.",
             status_code=303,
         )
 
@@ -1236,15 +1241,10 @@ def companies_upload_cover_image(request: Request, company_id: int, file: Upload
     return RedirectResponse(url=f"/companies/{company_id}?saved=1", status_code=303)
 
 
-@app.post("/companies/{company_id}/media")
-def companies_upload_media(request: Request, company_id: int, files: list[UploadFile] = File(...)):
-    user = _require_login_or_redirect(request)
-    if not user:
-        return RedirectResponse(url="/login", status_code=303)
-    company = _get_owned_company_or_none(company_id, user)
-    if not company:
-        return RedirectResponse(url="/companies", status_code=303)
-
+def _save_company_media_files(company: dict, files: list) -> tuple[list[int], int, int]:
+    """업로드된 파일들을 이 업체의 미디어로 저장하고 (새로 생긴 media_id 목록, 저장 성공 수,
+    건너뛴 수)를 돌려준다. /companies/{id}/media와 /content/new(새 콘텐츠 제작 화면에서
+    바로 업로드) 양쪽에서 공유한다."""
     import secrets
     from pathlib import Path
     from app.config import (
@@ -1253,12 +1253,16 @@ def companies_upload_media(request: Request, company_id: int, files: list[Upload
     )
     from app.db import repository as repo
 
+    company_id = company["id"]
     media_dir = UPLOADS_DIR / str(company["user_id"]) / str(company_id) / "media"
     media_dir.mkdir(parents=True, exist_ok=True)
     existing_count = len(repo.list_company_media(company_id))
+    new_media_ids: list[int] = []
     saved = 0
     skipped = 0
     for i, file in enumerate(files):
+        if not (file and file.filename):
+            continue
         ext = Path(file.filename or "").suffix.lower()
         if ext in COMPANY_IMAGE_EXTENSIONS:
             media_type, max_bytes = "image", COMPANY_IMAGE_MAX_BYTES
@@ -1272,12 +1276,27 @@ def companies_upload_media(request: Request, company_id: int, files: list[Upload
         if not ok:
             skipped += 1
             continue
-        repo.add_company_media(
+        media_id = repo.add_company_media(
             company_id, company["user_id"], media_type, to_relative_path(dest),
             original_filename=(file.filename or "")[:255], file_size_bytes=dest.stat().st_size,
             sort_order=existing_count + i,
         )
+        new_media_ids.append(media_id)
         saved += 1
+    return new_media_ids, saved, skipped
+
+
+@app.post("/companies/{company_id}/media")
+def companies_upload_media(request: Request, company_id: int, files: list[UploadFile] = File(...)):
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    company = _get_owned_company_or_none(company_id, user)
+    if not company:
+        return RedirectResponse(url="/companies", status_code=303)
+
+    from app.db import repository as repo
+    _new_ids, saved, skipped = _save_company_media_files(company, files)
     repo.write_audit_log(
         user["id"], "company_media_uploaded", target_type="company", target_id=company_id,
         metadata_json=f'{{"saved":{saved},"skipped":{skipped}}}',

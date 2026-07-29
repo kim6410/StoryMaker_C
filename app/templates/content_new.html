@@ -34,18 +34,20 @@
   </div>
 </form>
 
-<form method="post" action="/content/new" class="card company-form">
+<form method="post" action="/content/new" enctype="multipart/form-data" class="card company-form">
   <input type="hidden" name="company_id" value="{{ company.id if company else '' }}">
-  <h3 style="margin-top:0">업체 정보</h3>
-  <p style="color:var(--muted);font-size:12px;margin-top:-8px">위에서 선택한 업체 정보가 그대로 사용됩니다. 업체 정보 자체를 바꾸려면 <a href="/companies/{{ company.id if company else '' }}">업체 관리</a>에서 수정해 주세요.</p>
-  <div class="grid cols-2">
-    <div class="field"><label>업체명</label><input type="text" value="{{ company.company_name if company else '' }}" disabled></div>
-    <div class="field"><label>담당자</label><input type="text" value="{{ company.owner_name if company else '' }}" disabled></div>
-    <div class="field"><label>전화번호</label><input type="text" value="{{ company.phone_number if company else '' }}" disabled></div>
-    <div class="field"><label>업종</label><input type="text" value="{{ company.industry if company else '' }}" disabled></div>
-    <div class="field"><label>지역</label><input type="text" value="{{ company.region if company else '' }}" disabled></div>
-    <div class="field"><label>주요 서비스</label><input type="text" value="{{ company.main_services if company else '' }}" disabled></div>
-  </div>
+  <details class="accordion">
+    <summary style="cursor:pointer;font-weight:600;font-size:15px">업체 정보 (기본값 사용 중 · 펼쳐서 확인)</summary>
+    <p style="color:var(--muted);font-size:12px;margin:8px 0 -4px">위에서 선택한 업체 정보가 그대로 사용됩니다. 업체 정보 자체를 바꾸려면 <a href="/companies/{{ company.id if company else '' }}">업체 관리</a>에서 수정해 주세요.</p>
+    <div class="grid cols-2" style="margin-top:10px">
+      <div class="field"><label>업체명</label><input type="text" value="{{ company.company_name if company else '' }}" disabled></div>
+      <div class="field"><label>담당자</label><input type="text" value="{{ company.owner_name if company else '' }}" disabled></div>
+      <div class="field"><label>전화번호</label><input type="text" value="{{ company.phone_number if company else '' }}" disabled></div>
+      <div class="field"><label>업종</label><input type="text" value="{{ company.industry if company else '' }}" disabled></div>
+      <div class="field"><label>지역</label><input type="text" value="{{ company.region if company else '' }}" disabled></div>
+      <div class="field"><label>주요 서비스</label><input type="text" value="{{ company.main_services if company else '' }}" disabled></div>
+    </div>
+  </details>
 
   <h3>제작 조건</h3>
   <div class="field"><label>콘텐츠 주제 *</label><input type="text" name="topic" placeholder="예: 겨울철 보일러 점검 안내" required></div>
@@ -91,7 +93,7 @@
   <audio id="music-audio" controls style="width:100%;margin-top:6px;display:none"></audio>
 
   <div class="field" style="margin-top:12px" id="media-field">
-    <label>이번 제작에 참고할 사진·영상 (필수, 1개 이상 선택)</label>
+    <label>이번 제작에 참고할 사진·영상 (필수, 1개 이상 선택 또는 업로드)</label>
     {% if media %}
     <div class="grid cols-4" id="media-grid">
       {% for m in media %}
@@ -107,11 +109,15 @@
     </div>
     <p style="color:var(--muted);font-size:11px;margin-top:6px">사진을 선택해야 제작을 시작할 수 있습니다. 영상 자동 제작(MP4)은 현재 단계에서는 계속 그라디언트 장면으로 만들어지며, 선택한 원본은 보관함에서 그대로 확인할 수 있습니다.</p>
     {% else %}
-    <p style="color:var(--danger);font-size:12px">선택한 업체에 아직 업로드한 사진·영상이 없습니다. <a href="/companies/{{ company.id }}" style="color:var(--danger)">업체 관리</a>에서 먼저 사진을 업로드해야 제작을 시작할 수 있습니다.</p>
+    <p style="color:var(--muted);font-size:12px">선택한 업체에 아직 업로드한 사진·영상이 없습니다. 아래에서 바로 업로드하거나, <a href="/companies/{{ company.id }}">업체 관리</a>에서 미리 올려둘 수 있습니다.</p>
     {% endif %}
+    <div style="margin-top:10px">
+      <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:6px">새 사진·영상 업로드</label>
+      <input type="file" name="new_media_files" id="new-media-input" accept=".jpg,.jpeg,.png,.webp,.mp4,.mov,.webm" multiple>
+    </div>
   </div>
 
-  <button class="btn" style="margin-top:18px;width:auto;padding:0 24px" type="submit" data-once {{ 'disabled' if not media }}>딸깍 제작 시작 (SNS 8채널까지 자동 생성)</button>
+  <button class="btn" style="margin-top:18px;width:auto;padding:0 24px" type="submit" data-once>딸깍 제작 시작 (SNS 8채널까지 자동 생성)</button>
 </form>
 {% endif %}
 {% endblock %}
@@ -132,10 +138,12 @@
 (function(){
   var form = document.querySelector('form.company-form');
   var mediaField = document.getElementById('media-field');
+  var fileInput = document.getElementById('new-media-input');
   if (!form || !mediaField) return;
   form.addEventListener('submit', function(e){
     var checked = mediaField.querySelectorAll('.media-checkbox:checked');
-    if (checked.length === 0) {
+    var hasNewFiles = fileInput && fileInput.files && fileInput.files.length > 0;
+    if (checked.length === 0 && !hasNewFiles) {
       e.preventDefault();
       var warn = mediaField.querySelector('.media-required-warn');
       if (!warn) {
@@ -144,7 +152,7 @@
         warn.style.color = 'var(--danger)';
         warn.style.fontSize = '12px';
         warn.style.marginTop = '6px';
-        warn.textContent = '사진을 선택해주세요.';
+        warn.textContent = '사진을 선택하거나 업로드해주세요.';
         mediaField.appendChild(warn);
       }
       mediaField.scrollIntoView({behavior: 'smooth', block: 'center'});
