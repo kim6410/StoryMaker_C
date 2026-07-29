@@ -287,7 +287,27 @@ def create_content_job(
         voice_preference=voice_preference.strip() or "female",
     )
     repo.write_audit_log(user["id"], "content_job_created", target_type="project", target_id=project["id"])
-    return RedirectResponse(url=f"/content/job/{project['job_uid']}", status_code=303)
+
+    # 딸깍 제작: 입력→사진선택 제출 한 번으로 AI 원고 생성까지 이어서 시도한다(Dell Beta
+    # UX 참고). 상태 페이지에서 별도로 "생성하기"를 다시 누르는 중간 클릭을 없앤다.
+    # 실패해도 프로젝트 자체는 이미 저장돼 있으므로, 상태 페이지의 기존 재시도 버튼으로
+    # 그대로 이어서 재시도할 수 있다(복구 가능성 우선, 별도 롤백 불필요).
+    from app.ai.service import generate_channels_for_project
+    try:
+        outcome = generate_channels_for_project(project)
+    except Exception:
+        return RedirectResponse(
+            url=f"/content/job/{project['job_uid']}?gen_error=unknown_provider_error", status_code=303
+        )
+    repo.write_audit_log(
+        user["id"], "content_generation_attempted", target_type="project", target_id=project["id"],
+        metadata_json=f'{{"ok": {str(outcome.ok).lower()}, "error_code": "{outcome.error_code}"}}',
+    )
+    if outcome.ok:
+        return RedirectResponse(url=f"/content/job/{project['job_uid']}/channels", status_code=303)
+    return RedirectResponse(
+        url=f"/content/job/{project['job_uid']}?gen_error={outcome.error_code}", status_code=303
+    )
 
 
 def _get_owned_project_or_none(job_uid: str, user: dict):
@@ -1054,12 +1074,13 @@ def companies_create(
     description: str = Form(""), core_strength: str = Form(""), keywords: str = Form(""),
     must_include: str = Form(""), forbidden_words: str = Form(""), business_hours: str = Form(""),
     website_url: str = Form(""), naver_place_url: str = Form(""), google_business_url: str = Form(""),
-    tone_preference: str = Form(""), free_request: str = Form(""),
+    tone_tags: list[str] = Form([]), free_request: str = Form(""),
 ):
     user = _require_login_or_redirect(request)
     if not user:
         return RedirectResponse(url="/login", status_code=303)
     from app.db import repository as repo
+    tone_preference = ",".join(t.strip() for t in tone_tags if t.strip())
     fields = _company_form_fields(
         company_name, owner_name, phone_number, industry, industry_detail,
         region_metro, region_district, region_dong, road_address, detail_address,
@@ -1103,7 +1124,7 @@ def companies_update(
     description: str = Form(""), core_strength: str = Form(""), keywords: str = Form(""),
     must_include: str = Form(""), forbidden_words: str = Form(""), business_hours: str = Form(""),
     website_url: str = Form(""), naver_place_url: str = Form(""), google_business_url: str = Form(""),
-    tone_preference: str = Form(""), free_request: str = Form(""),
+    tone_tags: list[str] = Form([]), free_request: str = Form(""),
 ):
     user = _require_login_or_redirect(request)
     if not user:
@@ -1112,6 +1133,7 @@ def companies_update(
     if not company:
         return RedirectResponse(url="/companies", status_code=303)
     from app.db import repository as repo
+    tone_preference = ",".join(t.strip() for t in tone_tags if t.strip())
     fields = _company_form_fields(
         company_name, owner_name, phone_number, industry, industry_detail,
         region_metro, region_district, region_dong, road_address, detail_address,

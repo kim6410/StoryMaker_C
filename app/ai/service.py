@@ -65,13 +65,21 @@ def _build_context(project: dict) -> PromptContext:
     # 제작 당시 스냅샷에 없으면(예: core_strength, forbidden_words) 마이페이지 업체 정보에서
     # 보완한다. 업체 정보 자체는 스냅샷과 별개로 계속 최신 값을 유지하는 원본이므로,
     # 금지 표현처럼 항상 지켜야 하는 가드레일은 스냅샷이 아니라 최신 업체 설정을 따르는 편이 안전하다.
+    # brand_persona/must_include/free_request는 제작 화면에 입력란 자체가 없는(업체에만
+    # 존재하는) 값이므로 항상 최신 업체 정보에서 가져온다.
     core_strength = snapshot.get("core_strength", "")
     forbidden_words = snapshot.get("forbidden_words", "")
-    if (not core_strength or not forbidden_words) and project.get("company_id"):
+    brand_persona = ""
+    must_include = ""
+    free_request = ""
+    if project.get("company_id"):
         company = repo.get_company(project["company_id"])
         if company:
             core_strength = core_strength or company.get("core_strength", "")
             forbidden_words = forbidden_words or company.get("forbidden_words", "")
+            brand_persona = company.get("description", "")
+            must_include = company.get("must_include", "")
+            free_request = company.get("free_request", "")
     return PromptContext(
         user_id=project["user_id"],
         project_id=project["id"],
@@ -86,6 +94,9 @@ def _build_context(project: dict) -> PromptContext:
         keywords=snapshot.get("keywords", ""),
         tone_preference=snapshot.get("tone_preference", ""),
         forbidden_words=forbidden_words,
+        brand_persona=brand_persona,
+        must_include=must_include,
+        free_request=free_request,
     )
 
 

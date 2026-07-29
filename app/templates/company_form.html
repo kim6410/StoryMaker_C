@@ -40,11 +40,19 @@
   <h3>콘텐츠 제작 정보</h3>
   <div class="field"><label>주요 서비스</label><input type="text" name="main_services" value="{{ company.main_services if company else '' }}" placeholder="쉼표로 구분"></div>
   <div class="field"><label>핵심 고객층</label><input type="text" name="target_customers" value="{{ company.target_customers if company else '' }}"></div>
-  <div class="field"><label>업체 소개</label><textarea name="description">{{ company.description if company else '' }}</textarea></div>
+  <div class="field"><label>업체 소개(브랜드 페르소나)</label><textarea name="description" placeholder="업체의 역사·전문분야·타겟 고객·콘텐츠 방향 등을 자유롭게 적어 주세요. AI 원고 생성 시 브랜드 보이스로 그대로 반영됩니다.">{{ company.description if company else '' }}</textarea></div>
   <div class="field"><label>핵심 강점</label><textarea name="core_strength">{{ company.core_strength if company else '' }}</textarea></div>
-  <div class="grid cols-2">
-    <div class="field"><label>검색 키워드</label><input type="text" name="keywords" value="{{ company.keywords if company else '' }}" placeholder="쉼표로 구분"></div>
-    <div class="field"><label>원하는 말투</label><input type="text" name="tone_preference" value="{{ company.tone_preference if company else '' }}" placeholder="예: 친근한 존댓말"></div>
+  <div class="field"><label>검색 키워드</label><input type="text" name="keywords" value="{{ company.keywords if company else '' }}" placeholder="쉼표로 구분"></div>
+  <div class="field">
+    <label>기본 감성 톤(여러 개 선택 가능)</label>
+    {% set selected_tones = (company.tone_preference if company else '').split(',') | map('trim') | list %}
+    <div class="grid cols-4" style="margin-top:4px">
+      {% for tag in ['따뜻함','전문가','친근함','신뢰감','현장감','진정성','차분함','활기','담백함','순박함','진지함'] %}
+      <label style="display:flex;align-items:center;gap:6px;font-size:13px;font-weight:400;background:var(--panel-2);border-radius:8px;padding:8px 10px;cursor:pointer">
+        <input type="checkbox" name="tone_tags" value="{{ tag }}" {{ 'checked' if tag in selected_tones }}> {{ tag }}
+      </label>
+      {% endfor %}
+    </div>
   </div>
   <div class="field"><label>반드시 포함할 내용</label><textarea name="must_include">{{ company.must_include if company else '' }}</textarea></div>
   <div class="field"><label>피해야 할 표현</label><input type="text" name="forbidden_words" value="{{ company.forbidden_words if company else '' }}"></div>
