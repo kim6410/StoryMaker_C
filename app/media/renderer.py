@@ -6,9 +6,11 @@
 from __future__ import annotations
 
 import subprocess
+import threading
 from pathlib import Path
 
 from app.config import (
+    FFMPEG_MAX_CONCURRENT,
     FFMPEG_PATH,
     FONT_BOLD_PATH,
     FONT_REGULAR_PATH,
@@ -26,14 +28,20 @@ def _to_posix_rel(path: Path) -> str:
     return path.relative_to(PROJECT_ROOT).as_posix()
 
 
+# 서버 FFmpeg 동시 실행 제한(00_READ_FIRST 7-3장, 요청서 9-3장: 무제한 병렬 실행 금지).
+# 프로젝트 전역으로 공유되는 세마포어이며, 초과 요청은 여기서 대기(큐)한다.
+_FFMPEG_SEMAPHORE = threading.Semaphore(FFMPEG_MAX_CONCURRENT)
+
+
 def _run_ffmpeg(args: list[str], timeout: int = 180) -> tuple[bool, str]:
     cmd = [str(FFMPEG_PATH), "-y", "-hide_banner", "-loglevel", "error"] + args
-    try:
-        result = subprocess.run(cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True, timeout=timeout)
-    except subprocess.TimeoutExpired:
-        return False, "ffmpeg timeout"
-    except OSError as exc:
-        return False, f"ffmpeg exec failed: {exc}"
+    with _FFMPEG_SEMAPHORE:
+        try:
+            result = subprocess.run(cmd, cwd=str(PROJECT_ROOT), capture_output=True, text=True, timeout=timeout)
+        except subprocess.TimeoutExpired:
+            return False, "ffmpeg timeout"
+        except OSError as exc:
+            return False, f"ffmpeg exec failed: {exc}"
     if result.returncode != 0:
         return False, (result.stderr or "")[-2000:]
     return True, ""

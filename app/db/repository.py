@@ -1378,13 +1378,16 @@ def save_render_diagnostics(project_id: int, user_id: int, fields: dict) -> int:
         cur = conn.execute(
             """
             INSERT INTO content_render_diagnostics
-                (project_id, user_id, render_method, webgpu_ready, webcodecs_ready, memory_mb,
+                (project_id, user_id, render_method, webgpu_ready, webcodecs_ready, wasm_supported,
+                 server_ffmpeg_used, ffmpeg_elapsed_ms, memory_mb,
                  outcome, fallback_reason, total_ms, user_agent, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 project_id, user_id, fields.get("render_method", ""),
                 1 if fields.get("webgpu_ready") else 0, 1 if fields.get("webcodecs_ready") else 0,
+                1 if fields.get("wasm_supported") else 0, 1 if fields.get("server_ffmpeg_used") else 0,
+                fields.get("ffmpeg_elapsed_ms", 0),
                 fields.get("memory_mb"), fields.get("outcome", ""), fields.get("fallback_reason", ""),
                 fields.get("total_ms", 0), (fields.get("user_agent", "") or "")[:300], _now(),
             ),

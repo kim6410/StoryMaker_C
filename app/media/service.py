@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -57,6 +58,19 @@ class Mp4Outcome:
     file_size_bytes: int = 0
 
 
+def _log_server_ffmpeg_diagnostics(project_id: int, user_id: int, started_at: float,
+                                    outcome: str, error_code: str = "") -> None:
+    """Claude 최우선 요청서(0729): 서버 FFmpeg 경로(generate_mp4_for_project)의 실제 소요시간을
+    content_render_diagnostics에 남긴다. 지원 여부가 아니라 실제 실행 결과만 기록한다."""
+    elapsed_ms = int((time.monotonic() - started_at) * 1000)
+    repo.save_render_diagnostics(project_id, user_id, {
+        "render_method": "server", "webgpu_ready": False, "webcodecs_ready": False,
+        "wasm_supported": False, "server_ffmpeg_used": True, "ffmpeg_elapsed_ms": elapsed_ms,
+        "outcome": outcome, "fallback_reason": error_code, "total_ms": elapsed_ms,
+        "user_agent": "server",
+    })
+
+
 def _media_dir(job_uid: str) -> Path:
     d = JOBS_DIR / job_uid / "media"
     d.mkdir(parents=True, exist_ok=True)
@@ -106,6 +120,7 @@ def _resolve_scene_images(project: dict, media_dir: Path) -> list[Path]:
 def generate_mp4_for_project(project: dict) -> Mp4Outcome:
     project_id = project["id"]
     job_uid = project["job_uid"]
+    user_id = project["user_id"]
 
     existing_mp4 = repo.get_mp4_for_project(project_id)
     if existing_mp4 and existing_mp4["status"] == "success":
@@ -126,6 +141,7 @@ def generate_mp4_for_project(project: dict) -> Mp4Outcome:
         return Mp4Outcome(ok=False, error_code=MP4_ERR_NO_TTS, error_message=USER_MP4_ERROR_MESSAGES[MP4_ERR_NO_TTS])
 
     repo.update_project_status(project_id, PROJECT_STATUS_RENDERING)
+    render_started = time.monotonic()
 
     media_dir = _media_dir(job_uid)
     scene_images = _resolve_scene_images(project, media_dir)
@@ -165,6 +181,8 @@ def generate_mp4_for_project(project: dict) -> Mp4Outcome:
         if not ok:
             repo.upsert_mp4_result(project_id, status="failed", error_code=MP4_ERR_SCENE_RENDER_FAILED)
             repo.update_project_status(project_id, PROJECT_STATUS_FAILED, error_code=MP4_ERR_SCENE_RENDER_FAILED)
+            _log_server_ffmpeg_diagnostics(project_id, user_id, render_started,
+                                            "server_failed", MP4_ERR_SCENE_RENDER_FAILED)
             return Mp4Outcome(ok=False, error_code=MP4_ERR_SCENE_RENDER_FAILED,
                                error_message=USER_MP4_ERROR_MESSAGES[MP4_ERR_SCENE_RENDER_FAILED])
         clip_paths.append(clip_path)
@@ -176,6 +194,8 @@ def generate_mp4_for_project(project: dict) -> Mp4Outcome:
     if not ok:
         repo.upsert_mp4_result(project_id, status="failed", error_code=MP4_ERR_CONCAT_FAILED)
         repo.update_project_status(project_id, PROJECT_STATUS_FAILED, error_code=MP4_ERR_CONCAT_FAILED)
+        _log_server_ffmpeg_diagnostics(project_id, user_id, render_started,
+                                        "server_failed", MP4_ERR_CONCAT_FAILED)
         return Mp4Outcome(ok=False, error_code=MP4_ERR_CONCAT_FAILED,
                            error_message=USER_MP4_ERROR_MESSAGES[MP4_ERR_CONCAT_FAILED])
 
@@ -203,6 +223,8 @@ def generate_mp4_for_project(project: dict) -> Mp4Outcome:
     if not ok:
         repo.upsert_mp4_result(project_id, status="failed", error_code=MP4_ERR_AUDIO_MIX_FAILED)
         repo.update_project_status(project_id, PROJECT_STATUS_FAILED, error_code=MP4_ERR_AUDIO_MIX_FAILED)
+        _log_server_ffmpeg_diagnostics(project_id, user_id, render_started,
+                                        "server_failed", MP4_ERR_AUDIO_MIX_FAILED)
         return Mp4Outcome(ok=False, error_code=MP4_ERR_AUDIO_MIX_FAILED,
                            error_message=USER_MP4_ERROR_MESSAGES[MP4_ERR_AUDIO_MIX_FAILED])
 
@@ -211,6 +233,8 @@ def generate_mp4_for_project(project: dict) -> Mp4Outcome:
     if not ok:
         repo.upsert_mp4_result(project_id, status="failed", error_code=MP4_ERR_MUX_FAILED)
         repo.update_project_status(project_id, PROJECT_STATUS_FAILED, error_code=MP4_ERR_MUX_FAILED)
+        _log_server_ffmpeg_diagnostics(project_id, user_id, render_started,
+                                        "server_failed", MP4_ERR_MUX_FAILED)
         return Mp4Outcome(ok=False, error_code=MP4_ERR_MUX_FAILED,
                            error_message=USER_MP4_ERROR_MESSAGES[MP4_ERR_MUX_FAILED])
 
@@ -224,6 +248,8 @@ def generate_mp4_for_project(project: dict) -> Mp4Outcome:
             file_size_bytes=file_size, video_codec=probe.codec_name,
         )
         repo.update_project_status(project_id, PROJECT_STATUS_FAILED, error_code=MP4_ERR_VERIFY_FAILED)
+        _log_server_ffmpeg_diagnostics(project_id, user_id, render_started,
+                                        "server_failed", MP4_ERR_VERIFY_FAILED)
         return Mp4Outcome(ok=False, error_code=MP4_ERR_VERIFY_FAILED,
                            error_message=USER_MP4_ERROR_MESSAGES[MP4_ERR_VERIFY_FAILED])
 
@@ -233,6 +259,7 @@ def generate_mp4_for_project(project: dict) -> Mp4Outcome:
         duration_seconds=probe.duration_seconds, file_size_bytes=file_size, render_method="server",
     )
     repo.update_project_status(project_id, PROJECT_STATUS_COMPLETED)
+    _log_server_ffmpeg_diagnostics(project_id, user_id, render_started, "server_success")
     return Mp4Outcome(ok=True, duration_seconds=probe.duration_seconds, file_size_bytes=file_size)
 
 

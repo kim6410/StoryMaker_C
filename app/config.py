@@ -64,6 +64,9 @@ MP4_FPS = 30
 MP4_START_LEAD_SECONDS = 1.5   # 배경음악 페이드인 구간, 이 시간이 지난 뒤 TTS 시작
 MP4_END_HOLD_SECONDS = 2.0     # 마지막 TTS 종료 후 배경음악 페이드아웃 + 엔딩 카드 유지 시간
 MP4_TRANSITION_MAX_SECONDS = 2.5
+# 서버 FFmpeg 동시 실행 제한(요청서: 서버 부하 최소화, 무제한 병렬 subprocess 금지).
+# 초과 요청은 renderer._FFMPEG_SEMAPHORE에서 대기한다.
+FFMPEG_MAX_CONCURRENT = int(_os.environ.get("FFMPEG_MAX_CONCURRENT") or 2)
 FONT_BOLD_PATH = PROJECT_ROOT / "runtime" / "fonts" / "NanumGothic-Bold.ttf"
 FONT_REGULAR_PATH = PROJECT_ROOT / "runtime" / "fonts" / "NanumGothic-Regular.ttf"
 # TTS 발화 구간 배경음악 음량(덕킹, 선형 배율) / 무음(리드인·엔딩) 구간 음량 3단계

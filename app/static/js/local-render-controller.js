@@ -24,12 +24,17 @@
   }
 
   async function reportDiagnostics(jobUid, caps, outcome, fallbackReason, totalMs) {
+    // 이전에는 render_method를 항상 "local"로 고정 전송해, 서버 폴백 결과까지
+    // "local"로 잘못 기록되고 있었다(Claude 최우선 요청서 0729 발견). outcome을 근거로
+    // 실제 렌더 위치와 서버 FFmpeg 실사용 여부를 구분해 보낸다.
+    const usedServer = outcome === "fallback_success" || outcome === "fallback_failed";
     try {
       await fetch(`/content/job/${jobUid}/mp4/render-diagnostics`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          render_method: "local", webgpu_ready: caps.webgpu.supported,
-          webcodecs_ready: caps.webcodecsVideo.supported, memory_mb: caps.memoryMB,
+          render_method: usedServer ? "server" : "local", webgpu_ready: caps.webgpu.supported,
+          webcodecs_ready: caps.webcodecsVideo.supported, wasm_supported: !!caps.wasmSupported,
+          server_ffmpeg_used: usedServer, memory_mb: caps.memoryMB,
           outcome, fallback_reason: fallbackReason || "", total_ms: totalMs,
           user_agent: caps.userAgent,
         }),

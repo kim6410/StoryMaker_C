@@ -116,12 +116,16 @@
     const audio = detectAudioEncoder();
     const workerCanvas = detectWorkerAndCanvas();
     const memoryMB = estimateMemoryMB();
+    // 지원 여부만 검사한다(요청서 3-3장). 이 프로젝트의 렌더 파이프라인은 현재
+    // WebAssembly를 실제로 호출하지 않으므로 wasmSupported는 "지원 가능"일 뿐
+    // "실사용"을 의미하지 않는다 - 실사용 여부는 항상 false로 별도 보고한다.
+    const wasmSupported = typeof WebAssembly !== "undefined";
 
     const localRenderReady = webcodecsVideo.supported && audio.supported &&
       workerCanvas.worker && workerCanvas.offscreenCanvas;
 
     return {
-      webgpu, webcodecsVideo, audio, ...workerCanvas, memoryMB,
+      webgpu, webcodecsVideo, audio, ...workerCanvas, memoryMB, wasmSupported,
       localRenderReady,
       userAgent: navigator.userAgent,
       recommendServer: !localRenderReady || (memoryMB !== null && memoryMB < 1536),

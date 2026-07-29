@@ -775,6 +775,8 @@ async def content_job_mp4_render_diagnostics(request: Request, job_uid: str):
         "render_method": str(body.get("render_method", ""))[:20],
         "webgpu_ready": bool(body.get("webgpu_ready")),
         "webcodecs_ready": bool(body.get("webcodecs_ready")),
+        "wasm_supported": bool(body.get("wasm_supported")),
+        "server_ffmpeg_used": bool(body.get("server_ffmpeg_used")),
         "memory_mb": body.get("memory_mb"),
         "outcome": str(body.get("outcome", ""))[:20],
         "fallback_reason": str(body.get("fallback_reason", ""))[:100],

@@ -596,6 +596,19 @@ def _migration_015_scene_captions(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_016_render_diagnostics_expansion(conn: sqlite3.Connection) -> None:
+    """Claude 최우선 요청서(0729, 사용자자원 렌더링 실사용검증): '지원됨'과 '실제 사용됨'을
+    분리 저장하기 위해 content_render_diagnostics에 WASM 지원 여부와 서버 FFmpeg 실사용
+    여부·소요시간을 추가한다. 기존 행은 전부 0으로 채워지며 과거 데이터 의미는 바뀌지 않는다."""
+    conn.executescript(
+        """
+        ALTER TABLE content_render_diagnostics ADD COLUMN wasm_supported INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE content_render_diagnostics ADD COLUMN server_ffmpeg_used INTEGER NOT NULL DEFAULT 0;
+        ALTER TABLE content_render_diagnostics ADD COLUMN ffmpeg_elapsed_ms INTEGER NOT NULL DEFAULT 0;
+        """
+    )
+
+
 # 순서대로 등록. 이미 적용된 번호는 다시 실행하지 않는다.
 MIGRATIONS: list[Migration] = [
     (1, "initial_schema", _migration_001_initial_schema),
@@ -613,6 +626,7 @@ MIGRATIONS: list[Migration] = [
     (13, "company_expansion", _migration_013_company_expansion),
     (14, "scene_images", _migration_014_scene_images),
     (15, "scene_captions", _migration_015_scene_captions),
+    (16, "render_diagnostics_expansion", _migration_016_render_diagnostics_expansion),
 ]
 
 
