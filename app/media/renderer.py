@@ -52,7 +52,9 @@ def _zoom_expr(zoom_start: float, zoom_end: float, frames: int) -> str:
 
 def generate_scene_clip(spec: SceneSpec, render_duration: float, out_path: Path, texts_dir: Path,
                          company_name: str, phone_number: str) -> tuple[bool, str]:
-    """장면 하나를 독립 mp4 클립으로 렌더링한다(그라디언트 배경 + Ken Burns 줌 + 상호·전화번호·자막)."""
+    """장면 하나를 독립 mp4 클립으로 렌더링한다(배경 + Ken Burns 줌 + 상호·전화번호·자막).
+    spec.image_path가 있으면 그 사진을(9:16으로 채워 자르기), 없으면 기존과 동일한
+    그라디언트를 배경으로 쓴다."""
     texts_dir.mkdir(parents=True, exist_ok=True)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -63,16 +65,27 @@ def generate_scene_clip(spec: SceneSpec, render_duration: float, out_path: Path,
     phone_file = texts_dir / "phone.txt"
     phone_file.write_text(phone_number or " ", encoding="utf-8")
 
-    bg_png = texts_dir.parent / f"scene_{spec.scene_index:03d}_bg.png"
-    grad_args = [
-        "-f", "lavfi", "-i",
-        f"gradients=s={MP4_WIDTH}x{MP4_HEIGHT}:c0={spec.color0}:c1={spec.color1}:"
-        f"x0=120:y0=90:x1={MP4_WIDTH - 120}:y1={MP4_HEIGHT - 90}:nb_colors=2",
-        "-frames:v", "1", "-update", "1", str(bg_png),
-    ]
-    ok, err = _run_ffmpeg(grad_args, timeout=30)
-    if not ok:
-        return False, f"gradient_failed: {err}"
+    use_image = bool(spec.image_path and spec.image_path.is_file())
+    bg_png: Path | None = None
+    if use_image:
+        bg_rel = _to_posix_rel(spec.image_path)
+        scale_step = (
+            f"scale={MP4_WIDTH}:{MP4_HEIGHT}:force_original_aspect_ratio=increase,"
+            f"crop={MP4_WIDTH}:{MP4_HEIGHT}"
+        )
+    else:
+        bg_png = texts_dir.parent / f"scene_{spec.scene_index:03d}_bg.png"
+        grad_args = [
+            "-f", "lavfi", "-i",
+            f"gradients=s={MP4_WIDTH}x{MP4_HEIGHT}:c0={spec.color0}:c1={spec.color1}:"
+            f"x0=120:y0=90:x1={MP4_WIDTH - 120}:y1={MP4_HEIGHT - 90}:nb_colors=2",
+            "-frames:v", "1", "-update", "1", str(bg_png),
+        ]
+        ok, err = _run_ffmpeg(grad_args, timeout=30)
+        if not ok:
+            return False, f"gradient_failed: {err}"
+        bg_rel = _to_posix_rel(bg_png)
+        scale_step = f"scale={MP4_WIDTH}:{MP4_HEIGHT}"
 
     frames = max(1, round(render_duration * MP4_FPS))
     zoom_expr = _zoom_expr(spec.zoom_start, spec.zoom_end, frames)
@@ -84,10 +97,9 @@ def generate_scene_clip(spec: SceneSpec, render_duration: float, out_path: Path,
     caption_rel = _to_posix_rel(caption_file)
     company_rel = _to_posix_rel(company_file)
     phone_rel = _to_posix_rel(phone_file)
-    bg_rel = _to_posix_rel(bg_png)
 
     vf_parts = [
-        f"scale={MP4_WIDTH}:{MP4_HEIGHT}",
+        scale_step,
         (
             f"zoompan=z='{zoom_expr}':"
             f"x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':"
@@ -115,7 +127,8 @@ def generate_scene_clip(spec: SceneSpec, render_duration: float, out_path: Path,
         _to_posix_rel(out_path),
     ]
     ok, err = _run_ffmpeg(render_args, timeout=120)
-    bg_png.unlink(missing_ok=True)
+    if bg_png is not None:
+        bg_png.unlink(missing_ok=True)
     if not ok:
         return False, f"scene_render_failed: {err}"
     return True, ""
@@ -200,6 +213,45 @@ def extract_frame_at(video_path: Path, timestamp_seconds: float, out_path: Path,
     args = [
         "-ss", f"{max(timestamp_seconds, 0.0):.3f}", "-i", _to_posix_rel(video_path),
         "-frames:v", "1", "-vf", f"scale={width}:{height}", "-q:v", "3",
+        _to_posix_rel(out_path),
+    ]
+    ok, err = _run_ffmpeg(args, timeout=30)
+    if not ok:
+        return False, f"thumbnail_extract_failed: {err}"
+    return True, ""
+
+
+def extract_thumbnail_candidate(video_path: Path, timestamp_seconds: float, out_path: Path,
+                                 texts_dir: Path, index: int, headline: str,
+                                 width: int = MP4_WIDTH, height: int = MP4_HEIGHT) -> tuple[bool, str]:
+    """단계11 보완: 프레임만 뽑던 것에서 나아가, 배경을 살짝 어둡게 하고 굵은 헤드라인을
+    검정 외곽선과 함께 얹는다(사진 위에서도 읽히게 하는 원칙은 V1·Beta의 문서화된 방식을
+    참고: 굵은 글씨 + 검정 외곽선/그림자). 후보 8장은 같은 스타일이고 추출 시점(=영상
+    속 서로 다른 장면)만 다르다 - 실제로 존재가 확인되지 않는 "8종 서로 다른 레이아웃"을
+    지어내지 않고, 검증 가능한 원칙만 재구현했다."""
+    texts_dir.mkdir(parents=True, exist_ok=True)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    headline_file = texts_dir / f"thumb_headline_{index}.txt"
+    headline_file.write_text(headline or " ", encoding="utf-8")
+
+    font_bold_rel = _to_posix_rel(FONT_BOLD_PATH)
+    headline_rel = _to_posix_rel(headline_file)
+
+    vf_parts = [
+        f"scale={width}:{height}:force_original_aspect_ratio=increase,crop={width}:{height}",
+        "eq=brightness=-0.08:saturation=1.05",
+    ]
+    if (headline or "").strip():
+        vf_parts.append(
+            f"drawtext=fontfile='{font_bold_rel}':textfile='{headline_rel}':fontcolor=white:fontsize=52:"
+            f"line_spacing=12:x=(w-text_w)/2:y=190:borderw=6:bordercolor=black@0.9:"
+            f"box=1:boxcolor=black@0.32:boxborderw=22"
+        )
+
+    args = [
+        "-ss", f"{max(timestamp_seconds, 0.0):.3f}", "-i", _to_posix_rel(video_path),
+        "-frames:v", "1", "-vf", ",".join(vf_parts), "-q:v", "3",
         _to_posix_rel(out_path),
     ]
     ok, err = _run_ffmpeg(args, timeout=30)

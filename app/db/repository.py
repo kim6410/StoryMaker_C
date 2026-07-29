@@ -1252,13 +1252,16 @@ def replace_scenes(project_id: int, scenes: list[dict]) -> None:
             INSERT INTO content_scenes
                 (project_id, scene_index, sentence_index, start_seconds, duration_seconds,
                  zoom_type, zoom_start, zoom_end, transition_in_seconds, color0, color1,
-                 relative_clip_path, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 relative_clip_path, image_relative_path, caption, caption_start_local,
+                 caption_end_local, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             [
                 (project_id, s["scene_index"], s["sentence_index"], s["start_seconds"],
                  s["duration_seconds"], s["zoom_type"], s["zoom_start"], s["zoom_end"],
-                 s["transition_in_seconds"], s["color0"], s["color1"], s.get("relative_clip_path", ""), now)
+                 s["transition_in_seconds"], s["color0"], s["color1"], s.get("relative_clip_path", ""),
+                 s.get("image_relative_path", ""), s.get("caption", ""),
+                 s.get("caption_start_local", 0.0), s.get("caption_end_local", 0.0), now)
                 for s in scenes
             ],
         )

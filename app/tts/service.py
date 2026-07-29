@@ -40,6 +40,13 @@ USER_TTS_ERROR_MESSAGES = {
 }
 
 
+def _voice_preference_for_sentence(sentence_index: int) -> str:
+    """문장 인덱스로 여성·남성 음성을 교차 배정한다(0번=여성, 1번=남성, 2번=여성...).
+    화면에는 음성 선택 UI가 없고 이 규칙만으로 항상 결정되므로, 최초 생성과 재시도(단일
+    문장 재생성)가 항상 같은 결과를 내고 문장 순서만 알면 재현 가능하다."""
+    return "female" if sentence_index % 2 == 0 else "male"
+
+
 @dataclass
 class TtsOutcome:
     ok: bool
@@ -73,7 +80,7 @@ def _read_wav_as_row(path: Path) -> np.ndarray:
     return data
 
 
-def _rebuild_master(project: dict, job_uid: str, voice_preference: str) -> bool:
+def _rebuild_master(project: dict, job_uid: str) -> bool:
     """모든 문장이 success인 경우에만 디스크의 문장별 wav를 다시 읽어 전체 음성을 조립한다."""
     project_id = project["id"]
     rows = repo.list_tts_sentences_for_project(project_id)
@@ -96,7 +103,7 @@ def _rebuild_master(project: dict, job_uid: str, voice_preference: str) -> bool:
     repo.upsert_tts_master(
         project_id, status="success", relative_wav_path=to_relative_path(master_path),
         total_duration_seconds=probe.duration_seconds, sentence_gap_seconds=SUPERTONIC_SENTENCE_GAP_SECONDS,
-        voice=adapter.voice_name_for_preference(voice_preference),
+        voice="mixed_female_male",
     )
     return True
 
@@ -104,7 +111,6 @@ def _rebuild_master(project: dict, job_uid: str, voice_preference: str) -> bool:
 def generate_tts_for_project(project: dict) -> TtsOutcome:
     project_id = project["id"]
     job_uid = project["job_uid"]
-    voice_preference = project.get("voice_preference") or "female"
 
     existing_master = repo.get_tts_master_for_project(project_id)
     if existing_master and existing_master["status"] == "success":
@@ -128,11 +134,12 @@ def generate_tts_for_project(project: dict) -> TtsOutcome:
     shutil.rmtree(tts_dir, ignore_errors=True)
     tts_dir.mkdir(parents=True, exist_ok=True)
 
-    voice_name = adapter.voice_name_for_preference(voice_preference)
     plan = [
         {
             "sentence_index": i, "scene_index": u.scene_index, "original_text": u.original_text,
-            "normalized_text": u.normalized_text, "voice": voice_name, "speed": SUPERTONIC_DEFAULT_SPEED,
+            "normalized_text": u.normalized_text,
+            "voice": adapter.voice_name_for_preference(_voice_preference_for_sentence(i)),
+            "speed": SUPERTONIC_DEFAULT_SPEED,
         }
         for i, u in enumerate(units)
     ]
@@ -142,7 +149,9 @@ def generate_tts_for_project(project: dict) -> TtsOutcome:
     failed_count = 0
     for item in plan:
         idx = item["sentence_index"]
-        result = adapter.synthesize_sentence(item["normalized_text"], voice_preference, item["speed"])
+        result = adapter.synthesize_sentence(
+            item["normalized_text"], _voice_preference_for_sentence(idx), item["speed"]
+        )
         if not result.ok:
             repo.upsert_tts_sentence_result(project_id, idx, status="failed", error_code=result.error_code)
             failed_count += 1
@@ -163,7 +172,7 @@ def generate_tts_for_project(project: dict) -> TtsOutcome:
         success_count += 1
 
     if failed_count == 0:
-        _rebuild_master(project, job_uid, voice_preference)
+        _rebuild_master(project, job_uid)
         repo.update_project_status(project_id, PROJECT_STATUS_TTS_READY)
         return TtsOutcome(ok=True, total_sentences=len(plan), success_sentences=success_count, failed_sentences=0)
 
@@ -179,13 +188,13 @@ def generate_tts_for_project(project: dict) -> TtsOutcome:
 def regenerate_tts_sentence(project: dict, sentence_index: int) -> TtsOutcome:
     project_id = project["id"]
     job_uid = project["job_uid"]
-    voice_preference = project.get("voice_preference") or "female"
 
     rows = repo.list_tts_sentences_for_project(project_id)
     target = next((r for r in rows if r["sentence_index"] == sentence_index), None)
     if not target:
         return TtsOutcome(ok=False, error_code="not_found", error_message="해당 문장을 찾을 수 없습니다.")
 
+    voice_preference = _voice_preference_for_sentence(sentence_index)
     result = adapter.synthesize_sentence(target["normalized_text"], voice_preference, target["speed"])
     if not result.ok:
         repo.upsert_tts_sentence_result(project_id, sentence_index, status="failed", error_code=result.error_code)
@@ -206,7 +215,7 @@ def regenerate_tts_sentence(project: dict, sentence_index: int) -> TtsOutcome:
 
     all_rows = repo.list_tts_sentences_for_project(project_id)
     if all(r["status"] == "success" for r in all_rows):
-        _rebuild_master(project, job_uid, voice_preference)
+        _rebuild_master(project, job_uid)
         repo.update_project_status(project_id, PROJECT_STATUS_TTS_READY)
 
     return TtsOutcome(ok=True, total_sentences=len(all_rows),

@@ -35,10 +35,73 @@ USER_THUMBNAIL_ERROR_MESSAGES = {
 }
 
 
+_HEADLINE_CHARS_PER_LINE = 13
+_HEADLINE_MAX_LINES = 2
+
+
 def _thumb_dir(job_uid: str) -> Path:
     d = JOBS_DIR / job_uid / "media" / "thumbnails"
     d.mkdir(parents=True, exist_ok=True)
     return d
+
+
+def _wrap_headline(title: str) -> str:
+    """FFmpeg drawtext는 자동 줄바꿈이 없으므로 글자 수 기준으로 최대 2줄까지 직접
+    나누고, 그래도 넘치면 말줄임표로 축약한다(V1·Beta의 fitText류 자동 축소를 폰트 크기
+    동적 계산 대신 글자수 기준으로 단순화해 재구현 - FFmpeg에는 텍스트 폭 측정 API가 없음)."""
+    words = title.split()
+    lines: list[str] = []
+    current = ""
+    consumed = 0
+    for w in words:
+        candidate = f"{current} {w}".strip()
+        if len(candidate) > _HEADLINE_CHARS_PER_LINE and current:
+            if len(lines) == _HEADLINE_MAX_LINES:
+                break
+            lines.append(current)
+            consumed += len(current.split())
+            current = w
+        else:
+            current = candidate
+    if current and len(lines) < _HEADLINE_MAX_LINES:
+        lines.append(current)
+        consumed += len(current.split())
+
+    # 단어 단위로도 한 줄을 못 채우는 경우(공백 없는 긴 문자열 등) 글자수로 강제 절단한다.
+    lines = [(line if len(line) <= _HEADLINE_CHARS_PER_LINE else line[:_HEADLINE_CHARS_PER_LINE])
+             for line in lines[:_HEADLINE_MAX_LINES]]
+
+    if consumed < len(words) or (lines and len(lines[-1]) > _HEADLINE_CHARS_PER_LINE):
+        last = lines[-1] if lines else ""
+        if len(last) >= _HEADLINE_CHARS_PER_LINE:
+            last = last[:_HEADLINE_CHARS_PER_LINE - 1]
+        lines[-1] = last.rstrip() + "…"
+
+    return "\n".join(lines)
+
+
+def _pick_thumbnail_headline(project: dict) -> str:
+    """우선순위: 쇼츠용 핵심 제목 > SNS 결과 중 대표 제목(네이버 블로그) > 그 외 채널 제목
+    > 기초 콘텐츠(제작 주제)에서 추출한 짧은 문구. 화면 밖으로 넘치지 않도록 줄바꿈·축약한다."""
+    import json
+    from app.constants import CHANNEL_NAVER_BLOG, CHANNEL_SHORTFORM_SCRIPT
+
+    rows = {r["channel_code"]: r for r in repo.list_channel_results_for_project(project["id"])}
+    title = ""
+    shortform = rows.get(CHANNEL_SHORTFORM_SCRIPT)
+    if shortform and shortform.get("title"):
+        title = shortform["title"]
+    if not title:
+        naver = rows.get(CHANNEL_NAVER_BLOG)
+        if naver and naver.get("title"):
+            title = naver["title"]
+    if not title:
+        title = next((r["title"] for r in rows.values() if r and r.get("title")), "")
+    if not title:
+        snapshot = json.loads(project.get("input_snapshot_json") or "{}")
+        title = snapshot.get("topic", "")
+
+    return _wrap_headline((title or "").strip())
 
 
 def _candidate_path(job_uid: str, index: int) -> Path:
@@ -81,13 +144,18 @@ def ensure_candidates(project: dict) -> ThumbnailOutcome:
         return ThumbnailOutcome(ok=False, error_code="invalid_duration",
                                  error_message=USER_THUMBNAIL_ERROR_MESSAGES["invalid_duration"])
 
+    headline = _pick_thumbnail_headline(project)
+    texts_dir = JOBS_DIR / job_uid / "media" / "text"
+
     # 시작·끝의 페이드 구간을 피해 5%~92% 구간을 8등분한다(서로 다른 장면이 걸리도록).
     lo, hi = duration * 0.05, duration * 0.92
     span = max(hi - lo, 0.1)
     for i in range(CANDIDATE_COUNT):
         t = lo + span * (i / (CANDIDATE_COUNT - 1))
-        ok, err = renderer.extract_frame_at(video_path, t, _candidate_path(job_uid, i),
-                                             width=MP4_WIDTH, height=MP4_HEIGHT)
+        ok, err = renderer.extract_thumbnail_candidate(
+            video_path, t, _candidate_path(job_uid, i), texts_dir, i, headline,
+            width=MP4_WIDTH, height=MP4_HEIGHT,
+        )
         if not ok:
             return ThumbnailOutcome(ok=False, error_code="extract_failed",
                                      error_message=f"{USER_THUMBNAIL_ERROR_MESSAGES['extract_failed']} ({err})")

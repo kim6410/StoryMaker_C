@@ -672,6 +672,34 @@ def content_job_mp4_video(request: Request, job_uid: str):
     return range_file_response(request, path, "video/mp4", filename="content.mp4")
 
 
+@app.get("/content/job/{job_uid}/mp4/scene-image/{scene_index}")
+def content_job_scene_image(request: Request, job_uid: str, scene_index: int):
+    """단계11 보완: 로컬(WebCodecs) 렌더가 render-manifest.json의 image_url로 이 장면의
+    배경 사진을 받아오는 경로. 이 작업 소유의 장면에 배정된 파일만 내려준다(임의 경로 접근 금지)."""
+    from fastapi import HTTPException
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    project = _get_owned_project_or_none(job_uid, user)
+    if not project:
+        raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
+
+    from app.db import repository as repo
+    from app.config import PathEscapeError, to_absolute_path
+    from fastapi.responses import FileResponse
+    scenes = repo.list_scenes_for_project(project["id"])
+    scene = next((s for s in scenes if s["scene_index"] == scene_index), None)
+    if not scene or not scene["image_relative_path"]:
+        raise HTTPException(status_code=404, detail="이 장면에는 이미지가 없습니다.")
+    try:
+        path = to_absolute_path(scene["image_relative_path"])
+    except PathEscapeError:
+        raise HTTPException(status_code=404, detail="이미지를 찾을 수 없습니다.")
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="이미지를 찾을 수 없습니다.")
+    return FileResponse(path)
+
+
 @app.get("/content/job/{job_uid}/render-manifest.json")
 def content_job_render_manifest(request: Request, job_uid: str):
     """단계9: 브라우저 로컬 렌더가 사용할 검증된 작업 명세. 소유자만 접근 가능하다."""

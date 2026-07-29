@@ -573,6 +573,29 @@ def _migration_013_company_expansion(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_014_scene_images(conn: sqlite3.Connection) -> None:
+    """단계11 보완: 업로드/선택한 사진(또는 영상에서 추출한 대표 프레임)을 장면 배경으로
+    쓰기 위해 content_scenes에 이미지 경로 컬럼을 추가한다. 값이 없으면(과거 작업, 사진
+    없이 만든 작업) 기존과 동일하게 그라디언트로 폴백한다(데이터 보존, 최소 수정)."""
+    conn.executescript(
+        "ALTER TABLE content_scenes ADD COLUMN image_relative_path TEXT NOT NULL DEFAULT '';"
+    )
+
+
+def _migration_015_scene_captions(conn: sqlite3.Connection) -> None:
+    """단계11 보완: 지금까지 서버 FFmpeg 렌더 경로만 메모리 상의 자막 문장으로 화면에
+    구웠고 DB에는 저장하지 않아서, 로컬(WebCodecs) 렌더용 render-manifest.json에는 자막
+    문장이 아예 빠져 있었다(로컬 렌더가 성공하면 자막이 통째로 사라지는 원인). content_scenes에
+    자막 문장과 표시 구간을 저장해 두 렌더 경로가 같은 자막 데이터를 쓰게 한다."""
+    conn.executescript(
+        """
+        ALTER TABLE content_scenes ADD COLUMN caption TEXT NOT NULL DEFAULT '';
+        ALTER TABLE content_scenes ADD COLUMN caption_start_local REAL NOT NULL DEFAULT 0;
+        ALTER TABLE content_scenes ADD COLUMN caption_end_local REAL NOT NULL DEFAULT 0;
+        """
+    )
+
+
 # 순서대로 등록. 이미 적용된 번호는 다시 실행하지 않는다.
 MIGRATIONS: list[Migration] = [
     (1, "initial_schema", _migration_001_initial_schema),
@@ -588,6 +611,8 @@ MIGRATIONS: list[Migration] = [
     (11, "admin_fields", _migration_011_admin_fields),
     (12, "prompts", _migration_012_prompts),
     (13, "company_expansion", _migration_013_company_expansion),
+    (14, "scene_images", _migration_014_scene_images),
+    (15, "scene_captions", _migration_015_scene_captions),
 ]
 
 

@@ -39,6 +39,7 @@ class SceneSpec:
     transition_in_seconds: float   # 이전 장면에서 이 장면으로 넘어오는 전환 길이(첫 장면은 0)
     color0: str
     color1: str
+    image_path: Path | None = None  # 있으면 이 파일을 배경으로, 없으면 color0/color1 그라디언트로 렌더한다
 
 
 def _zoom_pattern(index: int, duration: float) -> tuple[str, float, float]:
@@ -67,7 +68,10 @@ def _transition_seconds(prev_duration: float, this_duration: float) -> float:
     return round(min(t, prev_duration / 2, this_duration / 2), 3)
 
 
-def build_scene_plan(srt_path: Path, master_total_duration: float, sentence_rows: list[dict]) -> list[SceneSpec]:
+def build_scene_plan(srt_path: Path, master_total_duration: float, sentence_rows: list[dict],
+                      image_paths: list[Path] | None = None) -> list[SceneSpec]:
+    """image_paths가 있으면 장면마다 순서대로 돌아가며 배경 사진으로 쓴다(사진 수보다 장면이
+    많으면 처음부터 다시 반복). 없으면 기존과 동일하게 그라디언트만 사용한다."""
     cues = parse_srt(srt_path)
     if len(cues) != len(sentence_rows):
         raise ValueError(f"cue count {len(cues)} != sentence count {len(sentence_rows)}")
@@ -94,6 +98,7 @@ def build_scene_plan(srt_path: Path, master_total_duration: float, sentence_rows
         zoom_type, zoom_start, zoom_end = _zoom_pattern(i, content_duration)
         color0, color1 = _PALETTE[i % len(_PALETTE)]
         transition_in = 0.0 if i == 0 else _transition_seconds(scenes[-1].duration_seconds, content_duration)
+        image_path = image_paths[i % len(image_paths)] if image_paths else None
 
         scenes.append(SceneSpec(
             scene_index=i, sentence_index=int(srow["sentence_index"]),
@@ -101,7 +106,7 @@ def build_scene_plan(srt_path: Path, master_total_duration: float, sentence_rows
             start_seconds=round(cumulative_content, 3), duration_seconds=round(content_duration, 3),
             caption_start_local=round(caption_start_local, 3), caption_end_local=round(caption_end_local, 3),
             zoom_type=zoom_type, zoom_start=zoom_start, zoom_end=zoom_end,
-            transition_in_seconds=transition_in, color0=color0, color1=color1,
+            transition_in_seconds=transition_in, color0=color0, color1=color1, image_path=image_path,
         ))
         cumulative_content += content_duration
 

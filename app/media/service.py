@@ -63,6 +63,46 @@ def _media_dir(job_uid: str) -> Path:
     return d
 
 
+def _resolve_scene_images(project: dict, media_dir: Path) -> list[Path]:
+    """제작 화면에서 선택·업로드한 이 작업의 미디어를 장면 배경 이미지 순서대로 정리한다.
+    영상 파일은 아직 슬라이드에 직접 넣지 않고(단계8 엔진은 정지 이미지 장면만 지원),
+    가운데 지점 프레임을 1장 뽑아 정지 이미지로 대신 쓴다(과도한 신규 렌더 엔진 없이
+    기존 이미지-장면 구조를 그대로 재사용, 최소 수정 우선)."""
+    snapshot = json.loads(project.get("input_snapshot_json") or "{}")
+    media_ids = snapshot.get("selected_media_ids") or []
+    if not media_ids:
+        return []
+
+    user_id = project["user_id"]
+    rows = []
+    for mid in media_ids:
+        row = repo.get_company_media_owned(mid, user_id)
+        if row:
+            rows.append(row)
+
+    images: list[Path] = []
+    frame_dir = media_dir / "source_frames"
+    for row in rows:
+        try:
+            abs_path = to_absolute_path(row["relative_path"])
+        except Exception:
+            continue
+        if not abs_path.is_file():
+            continue
+        if row["media_type"] == "image":
+            images.append(abs_path)
+            continue
+        # 영상: 길이의 절반 지점에서 대표 프레임을 뽑아 정지 이미지로 사용한다.
+        frame_dir.mkdir(parents=True, exist_ok=True)
+        frame_path = frame_dir / f"video_frame_{row['id']}.jpg"
+        probe = probe_media(str(abs_path))
+        mid_ts = (probe.duration_seconds / 2) if probe.ok and probe.duration_seconds > 0 else 0.0
+        ok, _err = renderer.extract_frame_at(abs_path, mid_ts, frame_path)
+        if ok and frame_path.is_file():
+            images.append(frame_path)
+    return images
+
+
 def generate_mp4_for_project(project: dict) -> Mp4Outcome:
     project_id = project["id"]
     job_uid = project["job_uid"]
@@ -87,8 +127,13 @@ def generate_mp4_for_project(project: dict) -> Mp4Outcome:
 
     repo.update_project_status(project_id, PROJECT_STATUS_RENDERING)
 
+    media_dir = _media_dir(job_uid)
+    scene_images = _resolve_scene_images(project, media_dir)
+
     srt_path = to_absolute_path(srt["relative_srt_path"])
-    scenes = build_scene_plan(srt_path, master["total_duration_seconds"], sentence_rows)
+    scenes = build_scene_plan(
+        srt_path, master["total_duration_seconds"], sentence_rows, image_paths=scene_images or None
+    )
 
     repo.replace_scenes(project_id, [
         {
@@ -96,6 +141,9 @@ def generate_mp4_for_project(project: dict) -> Mp4Outcome:
             "start_seconds": s.start_seconds, "duration_seconds": s.duration_seconds,
             "zoom_type": s.zoom_type, "zoom_start": s.zoom_start, "zoom_end": s.zoom_end,
             "transition_in_seconds": s.transition_in_seconds, "color0": s.color0, "color1": s.color1,
+            "image_relative_path": to_relative_path(s.image_path) if s.image_path else "",
+            "caption": s.caption, "caption_start_local": s.caption_start_local,
+            "caption_end_local": s.caption_end_local,
         }
         for s in scenes
     ])
@@ -104,7 +152,6 @@ def generate_mp4_for_project(project: dict) -> Mp4Outcome:
     company_name = snapshot.get("company_name", "")
     phone_number = snapshot.get("phone_number", "")
 
-    media_dir = _media_dir(job_uid)
     scenes_dir = media_dir / "scenes"
     texts_dir = media_dir / "text"
 
@@ -201,15 +248,24 @@ def build_render_manifest(project: dict) -> Optional[dict]:
 
     scenes = repo.list_scenes_for_project(project_id)
     if not scenes:
+        # 서버가 아직 장면을 만든 적이 없는 상태에서 로컬 렌더가 먼저 매니페스트를 요청한
+        # 경우다. MP4와 썸네일이 서로 다른 이미지 목록을 쓰지 않도록, 서버 렌더와 동일한
+        # _resolve_scene_images()로 같은 순서의 이미지를 배정한다(단계11 보완).
         srt_path = to_absolute_path(srt["relative_srt_path"])
         sentence_rows = repo.list_tts_sentences_for_project(project_id)
-        scenes_spec = build_scene_plan(srt_path, master["total_duration_seconds"], sentence_rows)
+        scene_images = _resolve_scene_images(project, _media_dir(job_uid))
+        scenes_spec = build_scene_plan(
+            srt_path, master["total_duration_seconds"], sentence_rows, image_paths=scene_images or None
+        )
         repo.replace_scenes(project_id, [
             {
                 "scene_index": s.scene_index, "sentence_index": s.sentence_index,
                 "start_seconds": s.start_seconds, "duration_seconds": s.duration_seconds,
                 "zoom_type": s.zoom_type, "zoom_start": s.zoom_start, "zoom_end": s.zoom_end,
                 "transition_in_seconds": s.transition_in_seconds, "color0": s.color0, "color1": s.color1,
+                "image_relative_path": to_relative_path(s.image_path) if s.image_path else "",
+                "caption": s.caption, "caption_start_local": s.caption_start_local,
+                "caption_end_local": s.caption_end_local,
             }
             for s in scenes_spec
         ])
@@ -236,6 +292,13 @@ def build_render_manifest(project: dict) -> Optional[dict]:
                 "zoom_start": s["zoom_start"], "zoom_end": s["zoom_end"],
                 "transition_in_seconds": s["transition_in_seconds"],
                 "color0": s["color0"], "color1": s["color1"],
+                "caption": s.get("caption", ""),
+                "caption_start_local": s.get("caption_start_local", 0.0),
+                "caption_end_local": s.get("caption_end_local", 0.0),
+                "image_url": (
+                    f"/content/job/{job_uid}/mp4/scene-image/{s['scene_index']}"
+                    if s.get("image_relative_path") else None
+                ),
             }
             for s in scenes
         ],

@@ -72,23 +72,15 @@
   </div>
 
   <h3>음성·배경음악</h3>
-  <div class="grid cols-2">
-    <div class="field">
-      <label>음성 화자</label>
-      <select name="voice_preference">
-        <option value="female">여성 음성</option>
-        <option value="male">남성 음성</option>
-      </select>
-    </div>
-    <div class="field">
-      <label>배경음악 ({{ music_items | length }}곡 보유)</label>
-      <select name="music_relative_path" id="music-select">
-        <option value="">사용 안 함</option>
-        {% for m in music_items %}
-        <option value="{{ m.relative_path }}">{{ m.name }} ({{ (m.duration_seconds // 60) | int }}:{{ '%02d' | format(m.duration_seconds % 60) }})</option>
-        {% endfor %}
-      </select>
-    </div>
+  <p style="color:var(--muted);font-size:12px;margin-top:-8px">음성은 여성·남성이 자동으로 교차 적용됩니다.</p>
+  <div class="field">
+    <label>배경음악 ({{ music_items | length }}곡 보유)</label>
+    <select name="music_relative_path" id="music-select">
+      <option value="">사용 안 함</option>
+      {% for m in music_items %}
+      <option value="{{ m.relative_path }}">{{ m.name }} ({{ (m.duration_seconds // 60) | int }}:{{ '%02d' | format(m.duration_seconds % 60) }})</option>
+      {% endfor %}
+    </select>
   </div>
   <audio id="music-audio" controls style="width:100%;margin-top:6px;display:none"></audio>
 

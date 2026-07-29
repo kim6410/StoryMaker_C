@@ -77,10 +77,39 @@ function zoomScaleAt(t, duration, zoomStart, zoomEnd) {
   return zoomStart + (zoomEnd - zoomStart) * ratio;
 }
 
+function drawCoverImage(ctx, img, width, height) {
+  // 9:16 프레임을 사진으로 여백 없이 채운다(짧은 변 기준 확대 후 중앙 크롭, 서버 FFmpeg의
+  // scale=increase,crop과 동일한 결과).
+  const scale = Math.max(width / img.width, height / img.height);
+  const dw = img.width * scale;
+  const dh = img.height * scale;
+  ctx.drawImage(img, (width - dw) / 2, (height - dh) / 2, dw, dh);
+}
+
+async function preloadSceneImages(scenes) {
+  // 장면마다 매 프레임 fetch하면 느리므로 미리 한 번씩만 받아 디코드해 둔다. 사진이 없는
+  // 장면이나 로딩에 실패한 장면은 이미지 없이(그라디언트 폴백) 그대로 진행한다 - 이미지
+  // 하나가 실패했다고 로컬 렌더 전체를 서버 폴백으로 넘기지 않는다.
+  const cache = new Map();
+  for (const scene of scenes) {
+    if (!scene.image_url || cache.has(scene.image_url)) continue;
+    try {
+      const res = await fetch(scene.image_url);
+      if (!res.ok) { cache.set(scene.image_url, null); continue; }
+      const blob = await res.blob();
+      cache.set(scene.image_url, await createImageBitmap(blob));
+    } catch (e) {
+      cache.set(scene.image_url, null);
+    }
+  }
+  return cache;
+}
+
 async function renderVideoTrack(manifest, muxer, onProgress) {
   const { width, height, fps, scenes, company_name: companyName, phone_number: phoneNumber } = manifest;
   const canvas = new OffscreenCanvas(width, height);
   const ctx = canvas.getContext("2d");
+  const imageCache = await preloadSceneImages(scenes);
 
   const videoEncoder = new VideoEncoder({
     output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
@@ -102,7 +131,12 @@ async function renderVideoTrack(manifest, muxer, onProgress) {
       const localT = i / fps;
       const zoom = zoomScaleAt(localT, scene.duration_seconds, scene.zoom_start, scene.zoom_end);
 
-      buildGradientCanvas(ctx, width, height, scene.color0, scene.color1);
+      const sceneImage = scene.image_url ? imageCache.get(scene.image_url) : null;
+      if (sceneImage) {
+        drawCoverImage(ctx, sceneImage, width, height);
+      } else {
+        buildGradientCanvas(ctx, width, height, scene.color0, scene.color1);
+      }
       // 간단한 줌: 확대된 소스 영역을 캔버스 전체에 그린다(중심 유지).
       const srcW = width / zoom, srcH = height / zoom;
       const srcX = (width - srcW) / 2, srcY = (height - srcH) / 2;

@@ -63,7 +63,7 @@
       <tr><td>키워드</td><td>{{ snapshot.keywords or '-' }}</td></tr>
       <tr><td>말투</td><td>{{ snapshot.tone_preference }}</td></tr>
       <tr><td>길이</td><td>{{ snapshot.content_length }}</td></tr>
-      <tr><td>음성</td><td>{{ '여성' if project.voice_preference == 'female' else '남성' }}</td></tr>
+      <tr><td>음성</td><td>여성·남성 자동 교차 적용</td></tr>
       <tr><td>배경음악</td><td>{{ project.music_relative_path.split('/')[-1] if project.music_relative_path else '사용 안 함' }}</td></tr>
     </tbody>
   </table>
@@ -97,7 +97,7 @@
   {% for ch in channels %}
   <div data-tab-panel="{{ ch.code }}" style="{{ '' if loop.first else 'display:none' }}">
     {% if ch.row %}
-    <form method="post" action="/content/job/{{ project.job_uid }}/channels/{{ ch.code }}/edit" data-async-submit
+    <form method="post" action="/content/job/{{ project.job_uid }}/channels/{{ ch.code }}/edit" class="channel-edit-form" data-async-submit
           data-progress-messages="저장하고 있습니다">
       <label style="font-size:11px;color:var(--muted)">제목</label>
       <input type="text" name="title" value="{{ ch.row.title }}" style="width:100%;margin-bottom:6px">
@@ -123,7 +123,7 @@
       {% endif %}
 
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn ghost" type="submit" style="width:auto;padding:0 14px">저장</button>
+        <button class="btn" type="submit" style="width:auto;padding:0 20px">저장</button>
         <button class="btn ghost" type="button" data-copy="#chan-{{ ch.code }}" style="width:auto;padding:0 14px">복사</button>
       </div>
     </form>
@@ -204,19 +204,6 @@
 
   {% if sentences %}
   <div class="card" style="margin-top:14px">
-    <h3 style="margin-top:0">문장별 타임라인</h3>
-    <div style="display:flex;height:28px;border-radius:8px;overflow:hidden;border:1px solid var(--border)">
-      {% for s in sentences %}
-      <div title="#{{ s.sentence_index + 1 }} · {{ '%.2f'|format(s.duration_seconds) }}초"
-           style="flex:{{ s.duration_seconds if s.duration_seconds > 0 else 0.3 }};
-                  background:{{ 'rgba(74,222,128,.35)' if s.status == 'success' else 'rgba(255,107,107,.35)' }};
-                  border-right:1px solid var(--bg);min-width:2px"></div>
-      {% endfor %}
-    </div>
-    <p style="color:var(--muted);font-size:11px;margin:6px 0 0">문장 길이에 비례한 타임라인입니다(초록: 완료, 빨강: 실패). 각 구간에 마우스를 올리면 번호와 길이가 보입니다.</p>
-  </div>
-
-  <div class="card" style="margin-top:14px">
     <h3 style="margin-top:0">문장별 음성 ({{ sentences|length }}개)</h3>
     <div class="table-wrap">
     <table>
@@ -262,22 +249,11 @@
   <p style="color:var(--muted);font-size:12px;margin:0">먼저 위 3단계에서 음성·자막(TTS·SRT) 만들기를 완료해 주세요.</p>
   {% else %}
 
-  <div id="renderChoice" class="grid cols-2">
-    <div class="card" style="background:var(--panel-2)">
-      <b style="font-size:13px">내 PC에서 빠르게 만들기</b>
-      <p style="color:var(--muted);font-size:12px;margin:6px 0">내 컴퓨터 성능을 사용합니다. 보통 더 빠르고, 이 브라우저가 지원하지 않거나 실패하면 자동으로 서버 방식으로 전환됩니다.</p>
-      <button class="btn" type="button" id="btnLocalRender" style="width:auto;padding:0 20px" disabled>내 PC에서 만들기</button>
-    </div>
-    <div class="card" style="background:var(--panel-2)">
-      <b style="font-size:13px">서버에서 안정적으로 만들기</b>
-      <p style="color:var(--muted);font-size:12px;margin:6px 0">내 컴퓨터 성능과 무관하게 항상 동작하는 안정적인 방식입니다. 서버 상황에 따라 시간이 조금 더 걸릴 수 있습니다.</p>
-      <form method="post" action="/content/job/{{ project.job_uid }}/mp4/generate" style="margin:0"
-            data-async-submit data-progress-messages="장면을 만들고 있습니다,배경음악과 음성을 합치고 있습니다,영상을 인코딩하고 있습니다,결과를 확인하고 있습니다">
-        <button class="btn secondary" type="submit" style="width:auto;padding:0 20px">서버에서 만들기</button>
-      </form>
-    </div>
-  </div>
-  <p id="capsHint" style="color:var(--muted);font-size:11px;margin:10px 0 0">이 PC의 제작 가능 여부를 확인하고 있습니다...</p>
+  <form method="post" action="/content/job/{{ project.job_uid }}/mp4/generate" id="mp4-form" style="margin:0">
+    <button class="btn" type="submit" id="btnMakeMp4" style="width:auto;padding:0 24px">
+      {% if mp4 and mp4.status == 'success' %}영상 다시 만들기{% else %}영상 만들기{% endif %}
+    </button>
+  </form>
   <div id="renderProgress" style="display:none;margin-top:10px">
     <p id="renderStage" style="color:var(--muted);font-size:12px;margin:0 0 6px">준비 중...</p>
     <div style="background:rgba(255,255,255,.08);border-radius:6px;overflow:hidden;height:8px">
@@ -294,8 +270,7 @@
   {% endif %}
 
   {% if mp4 and mp4.status == 'success' %}
-  <div class="grid cols-4" style="margin-top:14px">
-    <div class="card stat"><div class="num" style="font-size:16px">{{ '내 PC' if mp4.render_method == 'local' else '서버' }}</div><div class="label">제작 방식</div></div>
+  <div class="grid cols-3" style="margin-top:14px">
     <div class="card stat"><div class="num" style="font-size:16px">{{ mp4.width }}×{{ mp4.height }}</div><div class="label">해상도 · {{ mp4.fps|int }}fps</div></div>
     <div class="card stat"><div class="num" style="font-size:16px">{{ '%.1f'|format(mp4.duration_seconds) }}초</div><div class="label">영상 길이</div></div>
     <div class="card stat"><div class="num" style="font-size:16px">{{ (mp4.file_size_bytes / 1024 / 1024)|round(1) }}MB</div><div class="label">파일 크기</div></div>
@@ -429,35 +404,37 @@
 <script>
 (function () {
   const jobUid = {{ project.job_uid|tojson }};
-  const btn = document.getElementById('btnLocalRender');
-  const hint = document.getElementById('capsHint');
-  if (!btn || !hint) return;
+  const form = document.getElementById('mp4-form');
+  const btn = document.getElementById('btnMakeMp4');
+  if (!form || !btn) return;
   const progressWrap = document.getElementById('renderProgress');
   const stageEl = document.getElementById('renderStage');
   const barEl = document.getElementById('renderBar');
+  // 내부적으로 로컬(WebGPU/WebCodecs) 제작을 먼저 시도하고, 지원하지 않거나 실패하면
+  // 자동으로 서버 제작으로 넘어간다. 사용자에게는 어느 방식인지 노출하지 않고 하나의
+  // "영상 만들기" 진행 상태만 보여준다.
   const stageLabels = {
-    preparing_media: '이미지와 음성을 정리하고 있습니다',
+    preparing_media: '자료를 준비하고 있습니다',
     encoding_video: '장면을 만들고 있습니다',
     encoding_audio: '음성과 배경음악을 결합하고 있습니다',
     muxing: '영상을 압축하고 있습니다',
-    uploading: '서버에 안전하게 저장하고 있습니다',
-    server_rendering: '이 PC에서는 영상 제작이 어려워 서버 방식으로 이어서 만들고 있습니다. 이미 만든 원고·음성·자막은 그대로 사용합니다.',
+    uploading: '결과를 저장하고 있습니다',
+    server_rendering: '영상 제작 방식을 자동으로 전환했습니다.',
   };
 
+  // 준비(caps 감지)가 끝나기 전에 사용자가 이미 눌렀다면 그냥 평범한 폼 제출(서버 제작)로
+  // 진행되도록 두고, JS가 준비되면 그 이후 클릭부터 로컬 우선 시도를 가로챈다.
   StoryMakerRenderCapabilities.detect().then(function (caps) {
-    if (caps.localRenderReady) {
-      btn.disabled = false;
-      hint.textContent = '이 PC에서 빠른 제작을 사용할 수 있습니다' + (caps.recommendServer ? ' (서버 방식도 안정적입니다).' : '.');
-    } else {
-      hint.textContent = '이 브라우저에서는 내 PC 제작을 사용할 수 없어 서버 방식을 권장합니다.';
-    }
-
-    btn.addEventListener('click', function () {
+    form.addEventListener('submit', function (e) {
+      if (btn.dataset.locked === '1') { e.preventDefault(); return; }
+      e.preventDefault();
+      btn.dataset.locked = '1';
       btn.disabled = true;
       progressWrap.style.display = 'block';
+      stageEl.textContent = '준비하고 있습니다...';
       StoryMakerLocalRender.startLocalRender(jobUid, caps, {
         onStage: function (stage) {
-          stageEl.textContent = stageLabels[stage] || stage;
+          stageEl.textContent = stageLabels[stage] || '영상을 만들고 있습니다';
         },
         onProgress: function (ratio) {
           barEl.style.width = Math.round(ratio * 100) + '%';
@@ -469,13 +446,14 @@
           if (result.ok) {
             location.reload();
           } else {
-            stageEl.textContent = '영상 제작에 실패했습니다. 서버 방식으로 다시 시도해 주세요.';
+            stageEl.textContent = '영상 제작에 실패했습니다. 다시 시도하면 자동으로 다른 제작 방식을 사용합니다.';
             btn.disabled = false;
+            btn.dataset.locked = '';
           }
         },
       });
     });
-  });
+  }).catch(function () { /* 감지 실패 시 가로채지 않고 평범한 서버 제작 폼 제출로 그대로 진행 */ });
 
   var player = document.getElementById('mp4Player');
   var loadingHint = document.getElementById('mp4LoadingHint');
