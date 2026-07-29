@@ -1,0 +1,178 @@
+{% extends "base.html" %}
+{% block title %}관리자 - TTS·렌더 진단 - {{ app_name }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>TTS·렌더 진단 <span class="badge admin">관리자 전용</span></h1>
+  <p>FFmpeg·FFprobe는 페이지를 열 때마다 실제로 실행해 버전 응답을 확인합니다({{ checked_at }} 기준). Range 응답 검사는 버튼을 누르면 브라우저가 실제 서버에 Range 요청을 보내 결과를 확인합니다.</p>
+</div>
+
+<div style="display:flex;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+  <a class="btn secondary" style="width:auto;padding:0 16px" href="/admin/diagnostics">FFmpeg·FFprobe 다시 검사</a>
+  <button class="btn secondary" style="width:auto;padding:0 16px" type="button" id="range-check-btn" {% if not sample_video_job_uid %}disabled title="완성된 영상이 없어 검사할 수 없습니다"{% endif %}>Range 응답 검사 실행</button>
+</div>
+
+<div class="grid cols-4">
+  <div class="card stat">
+    <div class="num" style="color: {{ 'var(--ok)' if supertonic_ready else 'var(--danger)' }}">{{ '설치됨' if supertonic_ready else '미설치' }}</div>
+    <div class="label">Supertonic TTS 모델</div>
+  </div>
+  <div class="card stat">
+    <div class="num" style="color: {{ 'var(--ok)' if ffmpeg_check.ready else 'var(--danger)' }}">{{ '정상' if ffmpeg_check.ready else '오류' }}</div>
+    <div class="label">FFmpeg — {{ ffmpeg_check.detail }}</div>
+  </div>
+  <div class="card stat">
+    <div class="num" style="color: {{ 'var(--ok)' if ffprobe_check.ready else 'var(--danger)' }}">{{ '정상' if ffprobe_check.ready else '오류' }}</div>
+    <div class="label">FFprobe — {{ ffprobe_check.detail }}</div>
+  </div>
+  <div class="card stat" id="range-check-result">
+    <div class="num" style="color:var(--muted)">미실행</div>
+    <div class="label">Range 응답 검사(bytes=0-1023)</div>
+  </div>
+</div>
+
+<div class="grid cols-4" style="margin-top:14px">
+  <div class="card stat"><div class="num" style="color:var(--ok)">{{ tts_counts.success }}</div><div class="label">TTS 생성 성공</div></div>
+  <div class="card stat"><div class="num" style="color:var(--danger)">{{ tts_counts.failed }}</div><div class="label">TTS 생성 실패</div></div>
+  <div class="card stat"><div class="num">{{ browser_summary.webgpu_ready_n }} / {{ browser_summary.total }}</div><div class="label">WebGPU 지원 브라우저</div></div>
+  <div class="card stat"><div class="num">{{ browser_summary.webcodecs_ready_n }} / {{ browser_summary.total }}</div><div class="label">WebCodecs 지원 브라우저</div></div>
+</div>
+
+<div class="card" style="margin-top:16px">
+  <h3 style="margin-top:0">음성별 문장 통계</h3>
+  <p style="color:var(--muted);font-size:12px;margin-top:-8px">생성 소요시간은 별도로 계측하는 컬럼이 없어 문장 완료 시각 간의 실제 간격으로 추정한 값입니다(추정치).</p>
+  {% if voice_stats %}
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>음성</th><th>전체 문장</th><th>성공</th><th>실패</th><th>평균 오디오 길이(초)</th><th>평균 생성시간(초, 추정)</th></tr></thead>
+    <tbody>
+      {% for v in voice_stats %}
+      <tr>
+        <td>{{ v.voice }}</td><td>{{ v.total }}</td>
+        <td><span class="badge ok">{{ v.success }}</span></td>
+        <td>{% if v.failed %}<span class="badge warn">{{ v.failed }}</span>{% else %}0{% endif %}</td>
+        <td>{{ v.avg_duration }}</td>
+        <td>{{ v.avg_gen_seconds if v.avg_gen_seconds is not none else '미측정' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <div class="empty">아직 문장별 TTS 기록이 없습니다.</div>
+  {% endif %}
+</div>
+
+<div class="card" style="margin-top:16px">
+  <h3 style="margin-top:0">최근 TTS 실패</h3>
+  {% if recent_tts_failures %}
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>제목</th><th>사용자</th><th>문장 번호</th><th>오류코드</th><th>시각</th><th></th></tr></thead>
+    <tbody>
+      {% for f in recent_tts_failures %}
+      <tr>
+        <td>{{ f.title }}</td><td>{{ f.user_email }}</td><td>{{ f.sentence_index }}</td>
+        <td><span class="badge warn">{{ f.error_code }}</span></td>
+        <td>{{ f.updated_at }}</td>
+        <td><a class="btn ghost" href="/content/job/{{ f.job_uid }}/tts">재시도 화면으로 이동</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <div class="empty">최근 실패한 TTS 문장이 없습니다.</div>
+  {% endif %}
+</div>
+
+<div class="grid cols-2" style="margin-top:16px;align-items:start">
+  <div class="card">
+    <h3 style="margin-top:0">렌더 방식별 성공률</h3>
+    {% if render_rates %}
+    <table>
+      <tbody>
+        {% for method, r in render_rates.items() %}
+        <tr>
+          <td>{{ '내 PC(로컬)' if method == 'local' else '서버' }}</td>
+          <td>{{ r.success }} / {{ r.total }}</td>
+          <td><span class="badge {{ 'ok' if r.rate_pct >= 80 else 'warn' }}">{{ r.rate_pct }}%</span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty">아직 MP4 렌더 기록이 없습니다.</div>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">서버 폴백 이유</h3>
+    {% if fallback_reasons %}
+    <table>
+      <tbody>
+        {% for f in fallback_reasons %}
+        <tr><td>{{ f.fallback_reason }}</td><td>{{ f.n }}건</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty">서버 폴백이 발생한 적이 없습니다.</div>
+    {% endif %}
+  </div>
+</div>
+
+<div class="card" style="margin-top:16px">
+  <h3 style="margin-top:0">최근 MP4 메타데이터</h3>
+  {% if recent_mp4 %}
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>제목</th><th>사용자</th><th>제작방식</th><th>상태</th><th>해상도</th><th>길이</th><th>폴백사유</th><th>시각</th></tr></thead>
+    <tbody>
+      {% for m in recent_mp4 %}
+      <tr>
+        <td>{{ m.title }}</td><td>{{ m.user_email }}</td><td>{{ m.render_method }}</td>
+        <td><span class="badge {{ 'ok' if m.status == 'success' else ('warn' if m.status == 'failed' else 'muted') }}">{{ m.status }}</span></td>
+        <td>{{ m.width }}×{{ m.height }}</td>
+        <td>{{ '%.1f'|format(m.duration_seconds) }}초</td>
+        <td>{{ m.fallback_reason or '-' }}</td>
+        <td>{{ m.updated_at }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <div class="empty">아직 MP4 제작 기록이 없습니다.</div>
+  {% endif %}
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  "use strict";
+  var btn = document.getElementById("range-check-btn");
+  if (!btn) return;
+  var resultBox = document.getElementById("range-check-result");
+  btn.addEventListener("click", function () {
+    btn.disabled = true;
+    var original = btn.textContent;
+    btn.textContent = "검사 중...";
+    fetch("/content/job/{{ sample_video_job_uid }}/mp4/video", {
+      headers: { "Range": "bytes=0-1023" },
+    }).then(function (res) {
+      var ok = res.status === 206 && res.headers.get("content-range");
+      resultBox.querySelector(".num").textContent = ok ? "정상(206)" : ("비정상(" + res.status + ")");
+      resultBox.querySelector(".num").style.color = ok ? "var(--ok)" : "var(--danger)";
+      window.showToast(ok ? "Range 응답 정상 확인(206 Partial Content)" : "Range 응답 비정상: HTTP " + res.status);
+    }).catch(function (err) {
+      resultBox.querySelector(".num").textContent = "요청 실패";
+      resultBox.querySelector(".num").style.color = "var(--danger)";
+      window.showToast("Range 검사 요청이 실패했습니다: " + err);
+    }).finally(function () {
+      btn.disabled = false;
+      btn.textContent = original;
+    });
+  });
+})();
+</script>
+{% endblock %}

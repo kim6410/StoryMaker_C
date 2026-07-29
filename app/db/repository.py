@@ -1319,3 +1319,129 @@ def list_distinct_audit_actions() -> list[str]:
     with get_readonly_connection() as conn:
         rows = conn.execute("SELECT DISTINCT action FROM audit_logs ORDER BY action").fetchall()
         return [r["action"] for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# TTS·렌더 진단 (관리자)
+# ---------------------------------------------------------------------------
+def count_tts_master_by_status() -> dict:
+    with get_readonly_connection() as conn:
+        rows = conn.execute(
+            "SELECT status, COUNT(*) n FROM content_tts_master GROUP BY status"
+        ).fetchall()
+    counts = {"success": 0, "failed": 0, "pending": 0}
+    for r in rows:
+        counts[r["status"]] = r["n"]
+    return counts
+
+
+def count_tts_sentences_by_voice() -> list[dict]:
+    """음성별 문장 성공/실패 건수, 평균 오디오 길이(초), 평균 생성 소요시간(초).
+    생성 소요시간은 별도로 계측하는 컬럼이 없으므로, 같은 프로젝트 안에서 문장이
+    순서대로 합성되는 실제 흐름(replace_tts_sentences가 모든 문장을 batch 시작
+    시각으로 created_at=updated_at을 세팅하고, upsert_tts_sentence_result가 해당
+    문장 합성이 끝난 실제 시각으로 updated_at을 갱신하는 구조)을 이용해 이전 문장
+    완료 시각과의 실제 시간차로 추정한다. 이는 근사값이며 화면에도 '추정'으로
+    표기한다(작업지시 13번: 추측을 사실처럼 기록하지 않는다)."""
+    with get_readonly_connection() as conn:
+        rows = conn.execute(
+            """
+            WITH ordered AS (
+                SELECT project_id, sentence_index, voice, status, duration_seconds, updated_at,
+                       COALESCE(
+                           LAG(updated_at) OVER (PARTITION BY project_id ORDER BY sentence_index),
+                           created_at
+                       ) AS prev_time
+                FROM content_tts_sentences
+            )
+            SELECT voice,
+                   COUNT(*) AS total,
+                   SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) AS success_n,
+                   SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed_n,
+                   AVG(CASE WHEN status='success' THEN duration_seconds END) AS avg_duration,
+                   AVG(CASE WHEN status='success'
+                            THEN (julianday(updated_at) - julianday(prev_time)) * 86400.0 END) AS avg_gen_seconds
+            FROM ordered
+            WHERE voice != ''
+            GROUP BY voice
+            """
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def list_recent_tts_failures(limit: int = 10) -> list[dict]:
+    with get_readonly_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT s.project_id, s.sentence_index, s.error_code, s.updated_at,
+                   p.job_uid, p.title, u.email AS user_email
+            FROM content_tts_sentences s
+            JOIN projects p ON p.id = s.project_id
+            JOIN users u ON u.id = p.user_id
+            WHERE s.status='failed'
+            ORDER BY s.updated_at DESC LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_render_success_rates() -> dict:
+    """렌더 방식(local/server)별 성공률."""
+    with get_readonly_connection() as conn:
+        rows = conn.execute(
+            "SELECT render_method, status, COUNT(*) n FROM content_mp4 GROUP BY render_method, status"
+        ).fetchall()
+    result: dict = {}
+    for r in rows:
+        m = result.setdefault(r["render_method"] or "server", {"total": 0, "success": 0})
+        m["total"] += r["n"]
+        if r["status"] == "success":
+            m["success"] += r["n"]
+    for m in result.values():
+        m["rate_pct"] = round(m["success"] / m["total"] * 100, 1) if m["total"] else 0.0
+    return result
+
+
+def count_fallback_reasons() -> list[dict]:
+    with get_readonly_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT fallback_reason, COUNT(*) n FROM content_mp4
+            WHERE fallback_reason != '' GROUP BY fallback_reason ORDER BY n DESC
+            """
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_browser_feature_detection_summary() -> dict:
+    with get_readonly_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT COUNT(*) AS total,
+                   SUM(webgpu_ready) AS webgpu_ready_n,
+                   SUM(webcodecs_ready) AS webcodecs_ready_n
+            FROM content_render_diagnostics
+            """
+        ).fetchone()
+    total = row["total"] or 0
+    return {
+        "total": total,
+        "webgpu_ready_n": row["webgpu_ready_n"] or 0,
+        "webcodecs_ready_n": row["webcodecs_ready_n"] or 0,
+    }
+
+
+def list_recent_mp4_with_meta(limit: int = 15) -> list[dict]:
+    with get_readonly_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT m.*, p.job_uid, p.title, u.email AS user_email
+            FROM content_mp4 m
+            JOIN projects p ON p.id = m.project_id
+            JOIN users u ON u.id = p.user_id
+            ORDER BY m.updated_at DESC LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]

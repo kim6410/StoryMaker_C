@@ -63,6 +63,7 @@ ADMIN_MENU = [
     {"key": "admin_dashboard", "label": "관리자 대시보드", "href": "/admin", "icon": "grid"},
     {"key": "admin_members", "label": "회원관리", "href": "/admin/members", "icon": "shield"},
     {"key": "admin_jobs", "label": "작업관리", "href": "/admin/jobs", "icon": "clock"},
+    {"key": "admin_diagnostics", "label": "TTS·렌더 진단", "href": "/admin/diagnostics", "icon": "chart"},
     {"key": "admin_storage", "label": "저장공간·감사로그", "href": "/admin/storage", "icon": "folder"},
 ]
 
@@ -1145,6 +1146,78 @@ def admin_storage_page(request: Request, q: str = "", action: str = ""):
     return templates.TemplateResponse("admin_storage.html", _ctx(
         request, user, active="admin_storage", folders=folders, audit_rows=audit_rows,
         actions=repo.list_distinct_audit_actions(), q=q, action_filter=action,
+    ))
+
+
+def _run_version_check(exe_path: Path) -> dict:
+    """실행파일 존재 여부만이 아니라 실제로 기동해 버전 문자열을 얻는다(살아있는 실행 파일인지 검사)."""
+    if not exe_path.is_file():
+        return {"ready": False, "detail": "실행 파일 없음"}
+    import subprocess
+    try:
+        proc = subprocess.run(
+            [str(exe_path), "-version"], capture_output=True, text=True, timeout=5,
+        )
+        first_line = (proc.stdout or proc.stderr or "").splitlines()[0] if (proc.stdout or proc.stderr) else ""
+        return {"ready": proc.returncode == 0, "detail": first_line[:120] or f"exit code {proc.returncode}"}
+    except Exception as exc:  # 실행 자체가 실패한 경우도 진단 대상이므로 그대로 노출
+        return {"ready": False, "detail": f"실행 실패: {exc}"}
+
+
+@app.get("/admin/diagnostics")
+def admin_diagnostics_page(request: Request):
+    user = _require_admin_or_none(request)
+    if not user:
+        return RedirectResponse(url="/dashboard", status_code=303)
+    from app.db import repository as repo
+    from app.config import SUPERTONIC_MODEL_DIR, FFMPEG_PATH, FFPROBE_PATH
+
+    tts_counts = repo.count_tts_master_by_status()
+    voice_stats = []
+    for v in repo.count_tts_sentences_by_voice():
+        voice_stats.append({
+            "voice": v["voice"], "total": v["total"], "success": v["success_n"] or 0,
+            "failed": v["failed_n"] or 0,
+            "avg_duration": round(v["avg_duration"], 2) if v["avg_duration"] else 0,
+            "avg_gen_seconds": round(v["avg_gen_seconds"], 2) if v["avg_gen_seconds"] else None,
+        })
+
+    recent_tts_failures = []
+    for f in repo.list_recent_tts_failures(10):
+        recent_tts_failures.append({
+            "job_uid": f["job_uid"], "title": f["title"], "user_email": f["user_email"],
+            "sentence_index": f["sentence_index"], "error_code": f["error_code"] or "미기록",
+            "updated_at": f["updated_at"][:16].replace("T", " "),
+        })
+
+    render_rates = repo.get_render_success_rates()
+    fallback_reasons = repo.count_fallback_reasons()
+    browser_summary = repo.get_browser_feature_detection_summary()
+    recent_mp4_rows = repo.list_recent_mp4_with_meta(15)
+    recent_mp4 = []
+    sample_video_job_uid = ""
+    for m in recent_mp4_rows:
+        if not sample_video_job_uid and m["status"] == "success":
+            sample_video_job_uid = m["job_uid"]
+        recent_mp4.append({
+            "job_uid": m["job_uid"], "title": m["title"], "user_email": m["user_email"],
+            "render_method": "내 PC" if m["render_method"] == "local" else "서버",
+            "status": m["status"], "width": m["width"], "height": m["height"],
+            "duration_seconds": m["duration_seconds"], "fallback_reason": m.get("fallback_reason") or "",
+            "updated_at": m["updated_at"][:16].replace("T", " "),
+        })
+
+    ffmpeg_check = _run_version_check(FFMPEG_PATH)
+    ffprobe_check = _run_version_check(FFPROBE_PATH)
+
+    return templates.TemplateResponse("admin_diagnostics.html", _ctx(
+        request, user, active="admin_diagnostics",
+        tts_counts=tts_counts, voice_stats=voice_stats, recent_tts_failures=recent_tts_failures,
+        render_rates=render_rates, fallback_reasons=fallback_reasons, browser_summary=browser_summary,
+        recent_mp4=recent_mp4, sample_video_job_uid=sample_video_job_uid,
+        supertonic_ready=SUPERTONIC_MODEL_DIR.is_dir() and any(SUPERTONIC_MODEL_DIR.iterdir()) if SUPERTONIC_MODEL_DIR.is_dir() else False,
+        ffmpeg_check=ffmpeg_check, ffprobe_check=ffprobe_check,
+        checked_at=datetime.now(timezone.utc).strftime("%H:%M:%S UTC"),
     ))
 
 
