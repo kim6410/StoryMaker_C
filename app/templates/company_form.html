@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}{{ '새 업체 등록' if mode == 'new' else (company.company_name + ' - 업체 수정') }} - {{ app_name }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <p><a href="/companies" style="color:var(--muted)">&larr; 업체 관리로 돌아가기</a></p>
+  <h1>{{ '새 업체 등록' if mode == 'new' else company.company_name }}</h1>
+  {% if mode == 'edit' %}
+  <p>
+    {% if company.is_default %}<span class="badge ok">기본 업체</span>{% endif %}
+    {% if not company.is_active %}<span class="badge muted">비활성</span>{% endif %}
+  </p>
+  {% endif %}
+</div>
+
+{% if saved %}<div class="card" style="border-color:var(--ok);color:var(--ok);font-size:13px;margin-bottom:14px">저장되었습니다.</div>{% endif %}
+{% if error %}<div class="card" style="border-color:var(--danger);color:var(--danger);font-size:13px;margin-bottom:14px">{{ error }}</div>{% endif %}
+
+<form method="post" action="{{ '/companies' if mode == 'new' else '/companies/' + company.id|string }}" class="card company-form">
+  <h3 style="margin-top:0">기본 정보</h3>
+  <div class="grid cols-2">
+    <div class="field"><label>업체명 *</label><input type="text" name="company_name" value="{{ company.company_name if company else '' }}" required></div>
+    <div class="field"><label>대표자/담당자명</label><input type="text" name="owner_name" value="{{ company.owner_name if company else '' }}"></div>
+    <div class="field"><label>전화번호</label><input type="text" name="phone_number" value="{{ company.phone_number if company else '' }}" placeholder="예: 02-1234-5678"></div>
+    <div class="field"><label>업종</label><input type="text" name="industry" value="{{ company.industry if company else '' }}"></div>
+    <div class="field"><label>세부 업종</label><input type="text" name="industry_detail" value="{{ company.industry_detail if company else '' }}"></div>
+    <div class="field"><label>영업시간</label><input type="text" name="business_hours" value="{{ company.business_hours if company else '' }}" placeholder="예: 매일 09:00~18:00"></div>
+  </div>
+
+  <h3>위치</h3>
+  <div class="grid cols-3">
+    <div class="field"><label>시·도</label><input type="text" name="region_metro" value="{{ company.region_metro if company else '' }}" placeholder="예: 서울특별시"></div>
+    <div class="field"><label>시·군·구</label><input type="text" name="region_district" value="{{ company.region_district if company else '' }}" placeholder="예: 강북구"></div>
+    <div class="field"><label>읍·면·동</label><input type="text" name="region_dong" value="{{ company.region_dong if company else '' }}"></div>
+  </div>
+  <div class="grid cols-2">
+    <div class="field"><label>도로명 주소</label><input type="text" name="road_address" value="{{ company.road_address if company else '' }}"></div>
+    <div class="field"><label>상세 주소</label><input type="text" name="detail_address" value="{{ company.detail_address if company else '' }}"></div>
+  </div>
+
+  <h3>콘텐츠 제작 정보</h3>
+  <div class="field"><label>주요 서비스</label><input type="text" name="main_services" value="{{ company.main_services if company else '' }}" placeholder="쉼표로 구분"></div>
+  <div class="field"><label>핵심 고객층</label><input type="text" name="target_customers" value="{{ company.target_customers if company else '' }}"></div>
+  <div class="field"><label>업체 소개</label><textarea name="description">{{ company.description if company else '' }}</textarea></div>
+  <div class="field"><label>핵심 강점</label><textarea name="core_strength">{{ company.core_strength if company else '' }}</textarea></div>
+  <div class="grid cols-2">
+    <div class="field"><label>검색 키워드</label><input type="text" name="keywords" value="{{ company.keywords if company else '' }}" placeholder="쉼표로 구분"></div>
+    <div class="field"><label>원하는 말투</label><input type="text" name="tone_preference" value="{{ company.tone_preference if company else '' }}" placeholder="예: 친근한 존댓말"></div>
+  </div>
+  <div class="field"><label>반드시 포함할 내용</label><textarea name="must_include">{{ company.must_include if company else '' }}</textarea></div>
+  <div class="field"><label>피해야 할 표현</label><input type="text" name="forbidden_words" value="{{ company.forbidden_words if company else '' }}"></div>
+  <div class="field"><label>자유 요청사항</label><textarea name="free_request">{{ company.free_request if company else '' }}</textarea></div>
+
+  <h3>온라인 채널</h3>
+  <div class="field"><label>홈페이지</label><input type="text" name="website_url" value="{{ company.website_url if company else '' }}" placeholder="https://..."></div>
+  <div class="grid cols-2">
+    <div class="field"><label>네이버 플레이스 URL</label><input type="text" name="naver_place_url" value="{{ company.naver_place_url if company else '' }}" placeholder="https://..."></div>
+    <div class="field"><label>구글 비즈니스 URL</label><input type="text" name="google_business_url" value="{{ company.google_business_url if company else '' }}" placeholder="https://..."></div>
+  </div>
+
+  <button class="btn" style="margin-top:14px;width:auto;padding:0 24px" type="submit" data-once>{{ '등록' if mode == 'new' else '저장' }}</button>
+</form>
+
+{% if mode == 'edit' %}
+<div class="card" style="margin-top:14px">
+  <h3 style="margin-top:0">대표 이미지</h3>
+  {% if company.cover_image_relative_path %}
+  <img src="/companies/{{ company.id }}/cover-image" alt="대표 이미지" style="width:220px;aspect-ratio:16/9;object-fit:cover;border-radius:10px;margin-bottom:10px">
+  {% else %}
+  <p style="color:var(--muted);font-size:13px">아직 대표 이미지가 없습니다.</p>
+  {% endif %}
+  <form method="post" action="/companies/{{ company.id }}/cover-image" enctype="multipart/form-data" style="margin:0">
+    <input type="file" name="file" accept=".jpg,.jpeg,.png,.webp" required>
+    <button class="btn secondary" style="width:auto;padding:0 16px;margin-top:8px" type="submit" data-once>{{ '이미지 교체' if company.cover_image_relative_path else '이미지 업로드' }}</button>
+  </form>
+</div>
+
+<div class="card" style="margin-top:14px">
+  <h3 style="margin-top:0">콘텐츠용 사진·영상 ({{ media|length }}개)</h3>
+  <form method="post" action="/companies/{{ company.id }}/media" enctype="multipart/form-data" style="margin-bottom:14px">
+    <input type="file" name="files" accept=".jpg,.jpeg,.png,.webp,.mp4,.mov,.webm" multiple required>
+    <button class="btn secondary" style="width:auto;padding:0 16px;margin-top:8px" type="submit" data-once>업로드</button>
+  </form>
+  {% if media %}
+  <div class="grid cols-4">
+    {% for m in media %}
+    <div class="card" style="background:var(--panel-2);padding:8px">
+      {% if m.media_type == 'image' %}
+      <img src="/companies/{{ company.id }}/media/{{ m.id }}" alt="{{ m.original_filename }}" style="width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:8px">
+      {% else %}
+      <video src="/companies/{{ company.id }}/media/{{ m.id }}" controls preload="metadata" style="width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:8px;background:#000"></video>
+      {% endif %}
+      <p style="color:var(--muted);font-size:11px;margin:6px 0 4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ m.original_filename }}</p>
+      <form method="post" action="/companies/{{ company.id }}/media/{{ m.id }}/delete" style="margin:0">
+        <button class="btn ghost" type="submit" style="color:var(--danger)" data-once>삭제</button>
+      </form>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p style="color:var(--muted);font-size:13px;margin:0">아직 업로드한 사진·영상이 없습니다.</p>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

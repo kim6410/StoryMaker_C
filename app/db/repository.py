@@ -452,6 +452,13 @@ def list_audit_logs(limit: int = 100) -> list[dict]:
         return [dict(r) for r in rows]
 
 
+_COMPANY_EXTRA_FIELDS = (
+    "industry_detail", "region_metro", "region_district", "region_dong",
+    "road_address", "detail_address", "description", "keywords", "must_include",
+    "business_hours", "naver_place_url", "google_business_url",
+)
+
+
 def create_company(user_id: int, fields: dict) -> int:
     now = _now()
     with get_connection() as conn:
@@ -459,13 +466,18 @@ def create_company(user_id: int, fields: dict) -> int:
             "SELECT id FROM companies WHERE user_id=? AND is_default=1", (user_id,)
         ).fetchone()
         is_default = 0 if existing_default else 1
+        extra_values = [fields.get(k, "") for k in _COMPANY_EXTRA_FIELDS]
         cur = conn.execute(
             """
             INSERT INTO companies
                 (user_id, company_name, owner_name, phone_number, industry, region, address,
                  main_services, target_customers, core_strength, tone_preference, forbidden_words,
-                 website_url, free_request, is_default, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 website_url, free_request, is_default, is_active,
+                 industry_detail, region_metro, region_district, region_dong,
+                 road_address, detail_address, description, keywords, must_include,
+                 business_hours, naver_place_url, google_business_url,
+                 created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 user_id,
@@ -475,7 +487,8 @@ def create_company(user_id: int, fields: dict) -> int:
                 fields.get("main_services", ""), fields.get("target_customers", ""),
                 fields.get("core_strength", ""), fields.get("tone_preference", ""),
                 fields.get("forbidden_words", ""), fields.get("website_url", ""),
-                fields.get("free_request", ""), is_default, now, now,
+                fields.get("free_request", ""), is_default,
+                *extra_values, now, now,
             ),
         )
         return int(cur.lastrowid)
@@ -483,12 +496,17 @@ def create_company(user_id: int, fields: dict) -> int:
 
 def update_company(company_id: int, user_id: int, fields: dict) -> bool:
     with get_connection() as conn:
+        extra_values = [fields.get(k, "") for k in _COMPANY_EXTRA_FIELDS]
         cur = conn.execute(
             """
             UPDATE companies SET
                 company_name=?, owner_name=?, phone_number=?, industry=?, region=?, address=?,
                 main_services=?, target_customers=?, core_strength=?, tone_preference=?,
-                forbidden_words=?, website_url=?, free_request=?, updated_at=?
+                forbidden_words=?, website_url=?, free_request=?,
+                industry_detail=?, region_metro=?, region_district=?, region_dong=?,
+                road_address=?, detail_address=?, description=?, keywords=?, must_include=?,
+                business_hours=?, naver_place_url=?, google_business_url=?,
+                updated_at=?
             WHERE id=? AND user_id=?
             """,
             (
@@ -498,7 +516,8 @@ def update_company(company_id: int, user_id: int, fields: dict) -> bool:
                 fields.get("main_services", ""), fields.get("target_customers", ""),
                 fields.get("core_strength", ""), fields.get("tone_preference", ""),
                 fields.get("forbidden_words", ""), fields.get("website_url", ""),
-                fields.get("free_request", ""), _now(), company_id, user_id,
+                fields.get("free_request", ""),
+                *extra_values, _now(), company_id, user_id,
             ),
         )
         return cur.rowcount > 0
@@ -510,6 +529,15 @@ def get_company(company_id: int) -> Optional[dict]:
         return dict(row) if row else None
 
 
+def get_company_owned(company_id: int, user_id: int) -> Optional[dict]:
+    """소유권을 함께 확인해서 조회한다. 다른 사용자의 업체 ID로는 절대 값을 얻을 수 없다."""
+    with get_readonly_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM companies WHERE id=? AND user_id=?", (company_id, user_id)
+        ).fetchone()
+        return dict(row) if row else None
+
+
 def get_default_company_for_user(user_id: int) -> Optional[dict]:
     with get_readonly_connection() as conn:
         row = conn.execute(
@@ -518,7 +546,7 @@ def get_default_company_for_user(user_id: int) -> Optional[dict]:
         if row:
             return dict(row)
         row = conn.execute(
-            "SELECT * FROM companies WHERE user_id=? ORDER BY created_at LIMIT 1", (user_id,)
+            "SELECT * FROM companies WHERE user_id=? AND is_active=1 ORDER BY created_at LIMIT 1", (user_id,)
         ).fetchone()
         return dict(row) if row else None
 
@@ -529,6 +557,119 @@ def list_companies_for_user(user_id: int) -> list[dict]:
             "SELECT * FROM companies WHERE user_id=? ORDER BY is_default DESC, created_at", (user_id,)
         ).fetchall()
         return [dict(r) for r in rows]
+
+
+def set_default_company(company_id: int, user_id: int) -> bool:
+    """기본 업체를 전환한다. 기존 기본 업체를 먼저 0으로 내린 뒤 새 업체를 1로 올려
+    부분 UNIQUE 인덱스(사용자당 기본 업체 정확히 1개)를 절대 위반하지 않는다."""
+    now = _now()
+    with get_connection() as conn:
+        target = conn.execute(
+            "SELECT id FROM companies WHERE id=? AND user_id=? AND is_active=1", (company_id, user_id)
+        ).fetchone()
+        if not target:
+            return False
+        conn.execute(
+            "UPDATE companies SET is_default=0, updated_at=? WHERE user_id=? AND is_default=1",
+            (now, user_id),
+        )
+        conn.execute(
+            "UPDATE companies SET is_default=1, updated_at=? WHERE id=? AND user_id=?",
+            (now, company_id, user_id),
+        )
+        return True
+
+
+def set_company_active(company_id: int, user_id: int, is_active: bool) -> bool:
+    """업체를 활성/비활성 전환한다. 기본 업체를 비활성화하면 다른 활성 업체 중 하나를
+    자동으로 새 기본 업체로 지정해 '기본 업체 없음' 상태가 남지 않게 한다."""
+    now = _now()
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT is_default FROM companies WHERE id=? AND user_id=?", (company_id, user_id)
+        ).fetchone()
+        if not row:
+            return False
+        conn.execute(
+            "UPDATE companies SET is_active=?, updated_at=? WHERE id=? AND user_id=?",
+            (1 if is_active else 0, now, company_id, user_id),
+        )
+        if not is_active and row["is_default"]:
+            conn.execute(
+                "UPDATE companies SET is_default=0, updated_at=? WHERE id=? AND user_id=?",
+                (now, company_id, user_id),
+            )
+            fallback = conn.execute(
+                "SELECT id FROM companies WHERE user_id=? AND is_active=1 AND id!=? ORDER BY created_at LIMIT 1",
+                (user_id, company_id),
+            ).fetchone()
+            if fallback:
+                conn.execute(
+                    "UPDATE companies SET is_default=1, updated_at=? WHERE id=?",
+                    (now, fallback["id"]),
+                )
+        return True
+
+
+def set_company_cover_image(company_id: int, user_id: int, relative_path: str) -> bool:
+    with get_connection() as conn:
+        cur = conn.execute(
+            "UPDATE companies SET cover_image_relative_path=?, updated_at=? WHERE id=? AND user_id=?",
+            (relative_path, _now(), company_id, user_id),
+        )
+        return cur.rowcount > 0
+
+
+def count_companies_for_user(user_id: int) -> int:
+    with get_readonly_connection() as conn:
+        row = conn.execute("SELECT COUNT(*) FROM companies WHERE user_id=?", (user_id,)).fetchone()
+        return int(row[0])
+
+
+# ---------------------------------------------------------------------------
+# company_media (업체별 콘텐츠용 사진·영상 여러 장)
+# ---------------------------------------------------------------------------
+def add_company_media(company_id: int, user_id: int, media_type: str, relative_path: str,
+                       original_filename: str = "", file_size_bytes: int = 0, sort_order: int = 0) -> int:
+    with get_connection() as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO company_media
+                (company_id, user_id, media_type, relative_path, original_filename, file_size_bytes, sort_order, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (company_id, user_id, media_type, relative_path, original_filename, file_size_bytes, sort_order, _now()),
+        )
+        return int(cur.lastrowid)
+
+
+def list_company_media(company_id: int) -> list[dict]:
+    with get_readonly_connection() as conn:
+        rows = conn.execute(
+            "SELECT * FROM company_media WHERE company_id=? ORDER BY sort_order, created_at", (company_id,)
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def get_company_media_owned(media_id: int, user_id: int) -> Optional[dict]:
+    with get_readonly_connection() as conn:
+        row = conn.execute(
+            "SELECT * FROM company_media WHERE id=? AND user_id=?", (media_id, user_id)
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def delete_company_media(media_id: int, user_id: int) -> Optional[str]:
+    """소유자 확인 후 행을 지우고, 실제 파일 삭제를 위해 상대경로를 반환한다(파일
+    삭제는 호출부가 트랜잭션 밖에서 수행한다 - DB 쓰기와 파일 I/O를 분리하는 기존 관례)."""
+    with get_connection() as conn:
+        row = conn.execute(
+            "SELECT relative_path FROM company_media WHERE id=? AND user_id=?", (media_id, user_id)
+        ).fetchone()
+        if not row:
+            return None
+        conn.execute("DELETE FROM company_media WHERE id=?", (media_id,))
+        return row["relative_path"]
 
 
 def get_music_by_relative_path(relative_path: str) -> Optional[dict]:

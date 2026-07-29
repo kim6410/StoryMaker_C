@@ -11,12 +11,13 @@
   <header class="topbar">
     <div class="topbar-left">
       <button class="hamburger" data-hamburger aria-label="메뉴 열기">≡</button>
-      <a class="brand" href="/dashboard">StoryMaker <span style="color:var(--accent)">Claude Lab</span></a>
+      {% if active.startswith('admin') %}
+      <a class="brand" href="/admin">StoryMaker <span style="color:var(--accent)">관리자 센터</span></a>
+      {% else %}
+      <a class="brand" href="/dashboard">StoryMaker</a>
+      {% endif %}
     </div>
     <div class="topbar-right">
-      <div class="bell" data-toast-msg="새 알림이 없습니다. (샘플)">
-        🔔<span class="dot"></span>
-      </div>
       <div class="user-chip">
         <span class="only-desktop">{{ '관리자' if user.role == 'admin' else (user.display_name or '') }} ·</span>
         <b>{{ user.email }}</b>
@@ -27,18 +28,19 @@
     </div>
   </header>
 
+  {% import "_icons.html" as icons %}
   <nav class="sidebar" data-sidebar>
     <div class="nav-group-title">메뉴</div>
     {% for item in user_menu %}
     <a class="nav-item {{ 'active' if active == item.key else '' }}" href="{{ item.href }}">
-      <span class="nav-icon">•</span>{{ item.label }}
+      <span class="nav-icon">{{ icons.nav_icon(item.icon) }}</span>{{ item.label }}
     </a>
     {% endfor %}
     {% if admin_menu %}
     <div class="nav-group-title">관리자</div>
     {% for item in admin_menu %}
     <a class="nav-item admin {{ 'active' if active == item.key else '' }}" href="{{ item.href }}">
-      <span class="nav-icon">•</span>{{ item.label }}
+      <span class="nav-icon">{{ icons.nav_icon(item.icon) }}</span>{{ item.label }}
     </a>
     {% endfor %}
     {% endif %}

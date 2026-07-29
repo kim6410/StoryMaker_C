@@ -23,7 +23,7 @@ from app.auth.dependencies import get_optional_user
 APP_ROOT = Path(__file__).resolve().parent
 PROJECT_ROOT = APP_ROOT.parent
 
-app = FastAPI(title="StoryMaker Claude Lab", version="0.3.0-auth")
+app = FastAPI(title="StoryMaker", version="0.3.0-auth")
 app.mount("/static", StaticFiles(directory=APP_ROOT / "static"), name="static")
 templates = Jinja2Templates(directory=APP_ROOT / "templates")
 app.include_router(auth_router)
@@ -56,6 +56,7 @@ USER_MENU = [
     {"key": "content_new", "label": "새 콘텐츠 제작", "href": "/content/new", "icon": "plus"},
     {"key": "in_progress", "label": "진행 중 작업", "href": "/archive?status=in_progress", "icon": "clock"},
     {"key": "archive", "label": "보관함", "href": "/archive", "icon": "folder"},
+    {"key": "companies", "label": "업체 관리", "href": "/companies", "icon": "building"},
     {"key": "mypage", "label": "마이페이지", "href": "/mypage", "icon": "user"},
     {"key": "subscription", "label": "구독 및 사용량", "href": "/subscription", "icon": "chart"},
 ]
@@ -71,7 +72,7 @@ def _ctx(request: Request, user: dict, *, active: str = "", **extra) -> dict:
     admin_menu = ADMIN_MENU if str(user.get("role")) == "admin" else []
     return {
         "request": request,
-        "app_name": "StoryMaker Claude Lab",
+        "app_name": "StoryMaker",
         "user": user,
         "user_menu": USER_MENU,
         "admin_menu": admin_menu,  # 관리자가 아니면 서버에서부터 빈 리스트 -> DOM 자체가 생성되지 않음
@@ -113,7 +114,7 @@ def login_page(request: Request, error: str = "", verified: int = 0, verify_fail
     if get_optional_user(request):
         return RedirectResponse(url="/dashboard")
     return templates.TemplateResponse("login.html", {
-        "request": request, "app_name": "StoryMaker Claude Lab",
+        "request": request, "app_name": "StoryMaker",
         "error": error, "verified": verified, "verify_failed": verify_failed,
         "reset": reset, "logged_out": logged_out, "password_changed": password_changed,
     })
@@ -123,20 +124,20 @@ def login_page(request: Request, error: str = "", verified: int = 0, verify_fail
 def register_page(request: Request, error: str = ""):
     if get_optional_user(request):
         return RedirectResponse(url="/dashboard")
-    return templates.TemplateResponse("register.html", {"request": request, "app_name": "StoryMaker Claude Lab", "error": error})
+    return templates.TemplateResponse("register.html", {"request": request, "app_name": "StoryMaker", "error": error})
 
 
 @app.get("/verify-email")
 def verify_email_page(request: Request, email: str = "", dev_link: str = ""):
     return templates.TemplateResponse("verify_email.html", {
-        "request": request, "app_name": "StoryMaker Claude Lab", "email": email, "dev_link": dev_link,
+        "request": request, "app_name": "StoryMaker", "email": email, "dev_link": dev_link,
     })
 
 
 @app.get("/forgot-password")
 def forgot_password_page(request: Request, error: str = "", sent: int = 0, dev_link: str = "", expired: int = 0):
     return templates.TemplateResponse("forgot_password.html", {
-        "request": request, "app_name": "StoryMaker Claude Lab",
+        "request": request, "app_name": "StoryMaker",
         "error": error, "sent": sent, "dev_link": dev_link, "expired": expired,
     })
 
@@ -196,16 +197,25 @@ def dashboard_page(request: Request):
 
 
 @app.get("/content/new")
-def content_new_page(request: Request, error: str = ""):
+def content_new_page(request: Request, error: str = "", company_id: int = 0):
     user = _require_login_or_redirect(request)
     if not user:
         return RedirectResponse(url="/login", status_code=303)
     from app.db import repository as repo
     from app.content.music import list_music_files
-    company = repo.get_default_company_for_user(user["id"])
+
+    companies = [c for c in repo.list_companies_for_user(user["id"]) if c["is_active"]]
+    company = None
+    if company_id:
+        company = next((c for c in companies if c["id"] == company_id), None)
+    if not company:
+        company = repo.get_default_company_for_user(user["id"])
+        company = company if (company and company["is_active"]) else (companies[0] if companies else None)
+    media = repo.list_company_media(company["id"]) if company else []
     music_items = list_music_files()
     return templates.TemplateResponse("content_new.html", _ctx(
-        request, user, active="content_new", company=company, music_items=music_items, error=error,
+        request, user, active="content_new", company=company, companies=companies, media=media,
+        music_items=music_items, error=error,
     ))
 
 
@@ -218,13 +228,8 @@ def create_content_job(
     content_length: str = Form("medium"),
     music_relative_path: str = Form(""),
     voice_preference: str = Form("female"),
-    company_name: str = Form(""),
-    owner_name: str = Form(""),
-    phone_number: str = Form(""),
-    industry: str = Form(""),
-    region: str = Form(""),
-    main_services: str = Form(""),
-    target_customers: str = Form(""),
+    company_id: int = Form(0),
+    media_ids: list[int] = Form([]),
 ):
     import json
     user = _require_login_or_redirect(request)
@@ -236,29 +241,38 @@ def create_content_job(
     from app.db import repository as repo
     from app.content.music import resolve_music_path
 
-    company = repo.get_default_company_for_user(user["id"])
+    company = repo.get_company_owned(company_id, user["id"]) if company_id else None
+    if not company:
+        company = repo.get_default_company_for_user(user["id"])
+    if not company:
+        return RedirectResponse(url="/content/new?error=먼저+업체를+등록해+주세요.", status_code=303)
     if music_relative_path and not resolve_music_path(music_relative_path):
         music_relative_path = ""
 
+    # 선택한 미디어가 실제로 이 업체 소유인지 다시 확인한다(다른 업체 미디어 ID를
+    # 임의로 붙여넣는 것을 방지). 아직 영상 제작 파이프라인이 실제 사진을 장면
+    # 배경으로 쓰지는 않으므로(그라디언트 장면 유지, 단계8 계약 보존), 여기서는
+    # 스냅샷에 참조만 남겨 다음 단계 확장에 대비한다(미완료 항목 - 업무일지에 기록).
+    owned_media_ids = {m["id"] for m in repo.list_company_media(company["id"])}
+    selected_media_ids = [mid for mid in media_ids if mid in owned_media_ids]
+
     # 마이페이지 업체 정보와 별개로, 이번 제작 요청 당시 값을 스냅샷으로 고정한다.
-    # (나중에 마이페이지 업체 정보가 바뀌어도 이 작업의 과거 결과는 변하지 않는다.)
+    # (나중에 업체 정보가 바뀌어도 이 작업의 과거 결과는 변하지 않는다.)
     snapshot = {
-        "company_name": company_name.strip() or (company["company_name"] if company else ""),
-        "owner_name": owner_name.strip() or (company["owner_name"] if company else ""),
-        "phone_number": phone_number.strip() or (company["phone_number"] if company else ""),
-        "industry": industry.strip() or (company["industry"] if company else ""),
-        "region": region.strip() or (company["region"] if company else ""),
-        "main_services": main_services.strip() or (company["main_services"] if company else ""),
-        "target_customers": target_customers.strip() or (company["target_customers"] if company else ""),
+        "company_name": company["company_name"], "owner_name": company["owner_name"],
+        "phone_number": company["phone_number"], "industry": company["industry"],
+        "region": company["region"], "main_services": company["main_services"],
+        "target_customers": company["target_customers"],
         "topic": topic.strip(),
         "keywords": keywords.strip(),
         "tone_preference": tone_preference.strip(),
         "content_length": content_length.strip() or "medium",
+        "selected_media_ids": selected_media_ids,
     }
     project = repo.create_content_project(
         user_id=user["id"],
         title=topic.strip(),
-        company_id=(company["id"] if company else None),
+        company_id=company["id"],
         input_snapshot_json=json.dumps(snapshot, ensure_ascii=False),
         music_relative_path=music_relative_path,
         voice_preference=voice_preference.strip() or "female",
@@ -317,7 +331,7 @@ def content_job_generate(request: Request, job_uid: str):
         return RedirectResponse(url="/login", status_code=303)
     project = _get_owned_project_or_none(job_uid, user)
     if not project:
-        return RedirectResponse(url="/content/new")
+        return RedirectResponse(url="/content/new", status_code=303)
 
     from app.ai.service import generate_channels_for_project
     from app.db import repository as repo
@@ -381,7 +395,7 @@ def content_job_channel_regenerate(request: Request, job_uid: str, channel_code:
         return RedirectResponse(url="/login", status_code=303)
     project = _get_owned_project_or_none(job_uid, user)
     if not project:
-        return RedirectResponse(url="/content/new")
+        return RedirectResponse(url="/content/new", status_code=303)
 
     from app.ai.service import regenerate_channel_for_project
     from app.db import repository as repo
@@ -413,7 +427,7 @@ def content_job_channel_edit(
         return RedirectResponse(url="/login", status_code=303)
     project = _get_owned_project_or_none(job_uid, user)
     if not project:
-        return RedirectResponse(url="/content/new")
+        return RedirectResponse(url="/content/new", status_code=303)
 
     from app.db import repository as repo
     from app.constants import CHANNEL_CODES
@@ -436,7 +450,7 @@ def content_job_channel_revert(request: Request, job_uid: str, channel_code: str
         return RedirectResponse(url="/login", status_code=303)
     project = _get_owned_project_or_none(job_uid, user)
     if not project:
-        return RedirectResponse(url="/content/new")
+        return RedirectResponse(url="/content/new", status_code=303)
 
     from app.db import repository as repo
     repo.revert_channel_result(project["id"], channel_code)
@@ -452,7 +466,7 @@ def content_job_tts_generate(request: Request, job_uid: str):
         return RedirectResponse(url="/login", status_code=303)
     project = _get_owned_project_or_none(job_uid, user)
     if not project:
-        return RedirectResponse(url="/content/new")
+        return RedirectResponse(url="/content/new", status_code=303)
 
     from app.tts.service import generate_tts_for_project
     from app.db import repository as repo
@@ -474,7 +488,7 @@ def content_job_tts_sentence_regenerate(request: Request, job_uid: str, sentence
         return RedirectResponse(url="/login", status_code=303)
     project = _get_owned_project_or_none(job_uid, user)
     if not project:
-        return RedirectResponse(url="/content/new")
+        return RedirectResponse(url="/content/new", status_code=303)
 
     from app.tts.service import regenerate_tts_sentence
     from app.db import repository as repo
@@ -568,7 +582,7 @@ def content_job_mp4_generate(request: Request, job_uid: str):
         return RedirectResponse(url="/login", status_code=303)
     project = _get_owned_project_or_none(job_uid, user)
     if not project:
-        return RedirectResponse(url="/content/new")
+        return RedirectResponse(url="/content/new", status_code=303)
 
     from app.media.service import generate_mp4_for_project
     from app.db import repository as repo
@@ -665,7 +679,7 @@ async def content_job_mp4_upload_local(request: Request, job_uid: str, file: Upl
         return RedirectResponse(url="/login", status_code=303)
     project = _get_owned_project_or_none(job_uid, user)
     if not project:
-        return RedirectResponse(url="/content/new")
+        return RedirectResponse(url="/content/new", status_code=303)
 
     from app.config import JOBS_DIR
     from app.media.service import accept_local_render_upload
@@ -705,7 +719,7 @@ async def content_job_mp4_render_diagnostics(request: Request, job_uid: str):
         return RedirectResponse(url="/login", status_code=303)
     project = _get_owned_project_or_none(job_uid, user)
     if not project:
-        return RedirectResponse(url="/content/new")
+        return RedirectResponse(url="/content/new", status_code=303)
 
     body = await request.json()
     from app.db import repository as repo
@@ -755,7 +769,7 @@ def content_job_thumbnail_generate(request: Request, job_uid: str):
         return RedirectResponse(url="/login", status_code=303)
     project = _get_owned_project_or_none(job_uid, user)
     if not project:
-        return RedirectResponse(url="/content/new")
+        return RedirectResponse(url="/content/new", status_code=303)
 
     from app.media import thumbnail_service as thumbsvc
     from app.db import repository as repo
@@ -776,7 +790,7 @@ def content_job_thumbnail_select(request: Request, job_uid: str, candidate_index
         return RedirectResponse(url="/login", status_code=303)
     project = _get_owned_project_or_none(job_uid, user)
     if not project:
-        return RedirectResponse(url="/content/new")
+        return RedirectResponse(url="/content/new", status_code=303)
 
     from app.media import thumbnail_service as thumbsvc
     from app.db import repository as repo
@@ -916,7 +930,7 @@ def archive_delete(request: Request, job_uid: str):
         return RedirectResponse(url="/login", status_code=303)
     project = _get_owned_project_or_none(job_uid, user)
     if not project:
-        return RedirectResponse(url="/archive")
+        return RedirectResponse(url="/archive", status_code=303)
 
     from app.db import repository as repo
     from app.config import JOBS_DIR
@@ -949,53 +963,406 @@ def mypage_page(request: Request, error: str = "", saved: int = 0, tab: str = "p
     ))
 
 
-@app.post("/mypage/company")
-def save_company(
+def _get_owned_company_or_none(company_id: int, user: dict):
+    """company_id로 업체를 찾되, 본인 소유이거나 관리자일 때만 반환한다."""
+    from app.db import repository as repo
+    if str(user.get("role")) == "admin":
+        return repo.get_company(company_id)
+    return repo.get_company_owned(company_id, user["id"])
+
+
+def _company_form_fields(
+    company_name: str, owner_name: str, phone_number: str, industry: str, industry_detail: str,
+    region_metro: str, region_district: str, region_dong: str, road_address: str, detail_address: str,
+    main_services: str, target_customers: str, description: str, core_strength: str, keywords: str,
+    must_include: str, forbidden_words: str, business_hours: str, website_url: str,
+    naver_place_url: str, google_business_url: str, tone_preference: str, free_request: str,
+) -> dict:
+    return {
+        "company_name": company_name.strip(), "owner_name": owner_name.strip(),
+        "phone_number": phone_number.strip(), "industry": industry.strip(),
+        "industry_detail": industry_detail.strip(),
+        "region": " ".join(p for p in [region_metro.strip(), region_district.strip(), region_dong.strip()] if p),
+        "region_metro": region_metro.strip(), "region_district": region_district.strip(),
+        "region_dong": region_dong.strip(),
+        "address": road_address.strip(), "road_address": road_address.strip(),
+        "detail_address": detail_address.strip(),
+        "main_services": main_services.strip(), "target_customers": target_customers.strip(),
+        "description": description.strip(), "core_strength": core_strength.strip(),
+        "keywords": keywords.strip(), "must_include": must_include.strip(),
+        "forbidden_words": forbidden_words.strip(), "business_hours": business_hours.strip(),
+        "website_url": website_url.strip(), "naver_place_url": naver_place_url.strip(),
+        "google_business_url": google_business_url.strip(),
+        "tone_preference": tone_preference.strip(), "free_request": free_request.strip(),
+    }
+
+
+def _validate_company_fields(fields: dict) -> str:
+    """서버 쪽 최소 검증. 문제 있으면 한글 오류 문구, 없으면 빈 문자열."""
+    import re
+    if not fields["company_name"]:
+        return "업체명은 필수입니다."
+    phone = fields["phone_number"]
+    if phone and not re.fullmatch(r"[0-9\-]{7,20}", phone):
+        return "전화번호 형식이 올바르지 않습니다(숫자와 하이픈만 입력해 주세요)."
+    for label, key in (("홈페이지", "website_url"), ("네이버 플레이스", "naver_place_url"), ("구글 비즈니스", "google_business_url")):
+        val = fields.get(key, "")
+        if val and not re.match(r"^https?://", val):
+            return f"{label} 주소는 http:// 또는 https://로 시작해야 합니다."
+    return ""
+
+
+@app.get("/companies")
+def companies_list_page(request: Request, saved: int = 0):
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    from app.db import repository as repo
+    companies = repo.list_companies_for_user(user["id"])
+    return templates.TemplateResponse("companies_list.html", _ctx(
+        request, user, active="companies", companies=companies, saved=saved,
+    ))
+
+
+@app.get("/companies/new")
+def companies_new_page(request: Request, error: str = ""):
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    return templates.TemplateResponse("company_form.html", _ctx(
+        request, user, active="companies", company=None, media=[], error=error, mode="new",
+    ))
+
+
+@app.post("/companies")
+def companies_create(
     request: Request,
-    company_name: str = Form(""),
-    owner_name: str = Form(""),
-    phone_number: str = Form(""),
-    industry: str = Form(""),
-    region: str = Form(""),
-    address: str = Form(""),
-    main_services: str = Form(""),
-    target_customers: str = Form(""),
-    core_strength: str = Form(""),
-    tone_preference: str = Form(""),
-    forbidden_words: str = Form(""),
-    website_url: str = Form(""),
-    free_request: str = Form(""),
+    company_name: str = Form(""), owner_name: str = Form(""), phone_number: str = Form(""),
+    industry: str = Form(""), industry_detail: str = Form(""),
+    region_metro: str = Form(""), region_district: str = Form(""), region_dong: str = Form(""),
+    road_address: str = Form(""), detail_address: str = Form(""),
+    main_services: str = Form(""), target_customers: str = Form(""),
+    description: str = Form(""), core_strength: str = Form(""), keywords: str = Form(""),
+    must_include: str = Form(""), forbidden_words: str = Form(""), business_hours: str = Form(""),
+    website_url: str = Form(""), naver_place_url: str = Form(""), google_business_url: str = Form(""),
+    tone_preference: str = Form(""), free_request: str = Form(""),
 ):
     user = _require_login_or_redirect(request)
     if not user:
         return RedirectResponse(url="/login", status_code=303)
-    if not company_name.strip():
-        return RedirectResponse(url="/mypage?error=업체명은+필수입니다.", status_code=303)
     from app.db import repository as repo
-    fields = {
-        "company_name": company_name.strip(), "owner_name": owner_name.strip(),
-        "phone_number": phone_number.strip(), "industry": industry.strip(),
-        "region": region.strip(), "address": address.strip(),
-        "main_services": main_services.strip(), "target_customers": target_customers.strip(),
-        "core_strength": core_strength.strip(), "tone_preference": tone_preference.strip(),
-        "forbidden_words": forbidden_words.strip(), "website_url": website_url.strip(),
-        "free_request": free_request.strip(),
-    }
-    existing = repo.get_default_company_for_user(user["id"])
-    if existing:
-        repo.update_company(existing["id"], user["id"], fields)
-    else:
-        repo.create_company(user["id"], fields)
-    repo.write_audit_log(user["id"], "company_saved", target_type="company")
-    return RedirectResponse(url="/mypage?saved=1", status_code=303)
+    fields = _company_form_fields(
+        company_name, owner_name, phone_number, industry, industry_detail,
+        region_metro, region_district, region_dong, road_address, detail_address,
+        main_services, target_customers, description, core_strength, keywords,
+        must_include, forbidden_words, business_hours, website_url,
+        naver_place_url, google_business_url, tone_preference, free_request,
+    )
+    err = _validate_company_fields(fields)
+    if err:
+        from urllib.parse import quote
+        return RedirectResponse(url=f"/companies/new?error={quote(err)}", status_code=303)
+    company_id = repo.create_company(user["id"], fields)
+    repo.write_audit_log(user["id"], "company_created", target_type="company", target_id=company_id)
+    return RedirectResponse(url=f"/companies/{company_id}?saved=1", status_code=303)
 
 
-@app.get("/subscription")
-def subscription_page(request: Request):
+@app.get("/companies/{company_id}")
+def company_detail_page(request: Request, company_id: int, error: str = "", saved: int = 0):
     user = _require_login_or_redirect(request)
     if not user:
         return RedirectResponse(url="/login", status_code=303)
-    return templates.TemplateResponse("subscription.html", _ctx(request, user, active="subscription"))
+    company = _get_owned_company_or_none(company_id, user)
+    if not company:
+        return RedirectResponse(url="/companies")
+    from app.db import repository as repo
+    media = repo.list_company_media(company_id)
+    return templates.TemplateResponse("company_form.html", _ctx(
+        request, user, active="companies", company=company, media=media, error=error,
+        saved=saved, mode="edit",
+    ))
+
+
+@app.post("/companies/{company_id}")
+def companies_update(
+    request: Request, company_id: int,
+    company_name: str = Form(""), owner_name: str = Form(""), phone_number: str = Form(""),
+    industry: str = Form(""), industry_detail: str = Form(""),
+    region_metro: str = Form(""), region_district: str = Form(""), region_dong: str = Form(""),
+    road_address: str = Form(""), detail_address: str = Form(""),
+    main_services: str = Form(""), target_customers: str = Form(""),
+    description: str = Form(""), core_strength: str = Form(""), keywords: str = Form(""),
+    must_include: str = Form(""), forbidden_words: str = Form(""), business_hours: str = Form(""),
+    website_url: str = Form(""), naver_place_url: str = Form(""), google_business_url: str = Form(""),
+    tone_preference: str = Form(""), free_request: str = Form(""),
+):
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    company = _get_owned_company_or_none(company_id, user)
+    if not company:
+        return RedirectResponse(url="/companies", status_code=303)
+    from app.db import repository as repo
+    fields = _company_form_fields(
+        company_name, owner_name, phone_number, industry, industry_detail,
+        region_metro, region_district, region_dong, road_address, detail_address,
+        main_services, target_customers, description, core_strength, keywords,
+        must_include, forbidden_words, business_hours, website_url,
+        naver_place_url, google_business_url, tone_preference, free_request,
+    )
+    err = _validate_company_fields(fields)
+    if err:
+        from urllib.parse import quote
+        return RedirectResponse(url=f"/companies/{company_id}?error={quote(err)}", status_code=303)
+    repo.update_company(company_id, company["user_id"], fields)
+    repo.write_audit_log(user["id"], "company_updated", target_type="company", target_id=company_id)
+    return RedirectResponse(url=f"/companies/{company_id}?saved=1", status_code=303)
+
+
+@app.post("/companies/{company_id}/default")
+def companies_set_default(request: Request, company_id: int):
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    company = _get_owned_company_or_none(company_id, user)
+    if not company:
+        return RedirectResponse(url="/companies", status_code=303)
+    from app.db import repository as repo
+    ok = repo.set_default_company(company_id, company["user_id"])
+    if ok:
+        repo.write_audit_log(user["id"], "company_default_changed", target_type="company", target_id=company_id)
+    return RedirectResponse(url="/companies?saved=1", status_code=303)
+
+
+@app.post("/companies/{company_id}/active")
+def companies_set_active(request: Request, company_id: int, is_active: str = Form(...)):
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    company = _get_owned_company_or_none(company_id, user)
+    if not company:
+        return RedirectResponse(url="/companies", status_code=303)
+    from app.db import repository as repo
+    repo.set_company_active(company_id, company["user_id"], is_active == "1")
+    repo.write_audit_log(
+        user["id"], "company_active_changed", target_type="company", target_id=company_id,
+        metadata_json=f'{{"is_active":{is_active == "1"}}}',
+    )
+    return RedirectResponse(url="/companies?saved=1", status_code=303)
+
+
+def _save_upload_stream(file, dest_path, max_bytes: int):
+    """청크 단위로 저장하며 크기 제한을 넘으면 즉시 중단하고 삭제한다."""
+    written = 0
+    with open(dest_path, "wb") as f:
+        while True:
+            chunk = file.file.read(1024 * 1024)
+            if not chunk:
+                break
+            written += len(chunk)
+            if written > max_bytes:
+                f.close()
+                dest_path.unlink(missing_ok=True)
+                return False, written
+            f.write(chunk)
+    return True, written
+
+
+@app.post("/companies/{company_id}/cover-image")
+def companies_upload_cover_image(request: Request, company_id: int, file: UploadFile = File(...)):
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    company = _get_owned_company_or_none(company_id, user)
+    if not company:
+        return RedirectResponse(url="/companies", status_code=303)
+
+    import secrets
+    from pathlib import Path
+    from app.config import UPLOADS_DIR, COMPANY_IMAGE_EXTENSIONS, COMPANY_IMAGE_MAX_BYTES, to_relative_path
+    from app.db import repository as repo
+
+    ext = Path(file.filename or "").suffix.lower()
+    if ext not in COMPANY_IMAGE_EXTENSIONS:
+        return RedirectResponse(url=f"/companies/{company_id}?error=지원하지+않는+이미지+형식입니다.", status_code=303)
+
+    company_dir = UPLOADS_DIR / str(company["user_id"]) / str(company_id) / "cover"
+    company_dir.mkdir(parents=True, exist_ok=True)
+    dest = company_dir / f"cover_{secrets.token_hex(6)}{ext}"
+    ok, _size = _save_upload_stream(file, dest, COMPANY_IMAGE_MAX_BYTES)
+    if not ok:
+        return RedirectResponse(url=f"/companies/{company_id}?error=이미지+용량이+너무+큽니다(최대+10MB).", status_code=303)
+
+    old_path = company.get("cover_image_relative_path")
+    repo.set_company_cover_image(company_id, company["user_id"], to_relative_path(dest))
+    if old_path:
+        from app.config import to_absolute_path
+        try:
+            to_absolute_path(old_path).unlink(missing_ok=True)
+        except Exception:
+            pass
+    repo.write_audit_log(user["id"], "company_cover_image_uploaded", target_type="company", target_id=company_id)
+    return RedirectResponse(url=f"/companies/{company_id}?saved=1", status_code=303)
+
+
+@app.post("/companies/{company_id}/media")
+def companies_upload_media(request: Request, company_id: int, files: list[UploadFile] = File(...)):
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    company = _get_owned_company_or_none(company_id, user)
+    if not company:
+        return RedirectResponse(url="/companies", status_code=303)
+
+    import secrets
+    from pathlib import Path
+    from app.config import (
+        UPLOADS_DIR, COMPANY_IMAGE_EXTENSIONS, COMPANY_VIDEO_EXTENSIONS,
+        COMPANY_IMAGE_MAX_BYTES, COMPANY_VIDEO_MAX_BYTES, to_relative_path,
+    )
+    from app.db import repository as repo
+
+    media_dir = UPLOADS_DIR / str(company["user_id"]) / str(company_id) / "media"
+    media_dir.mkdir(parents=True, exist_ok=True)
+    existing_count = len(repo.list_company_media(company_id))
+    saved = 0
+    skipped = 0
+    for i, file in enumerate(files):
+        ext = Path(file.filename or "").suffix.lower()
+        if ext in COMPANY_IMAGE_EXTENSIONS:
+            media_type, max_bytes = "image", COMPANY_IMAGE_MAX_BYTES
+        elif ext in COMPANY_VIDEO_EXTENSIONS:
+            media_type, max_bytes = "video", COMPANY_VIDEO_MAX_BYTES
+        else:
+            skipped += 1
+            continue
+        dest = media_dir / f"{media_type}_{secrets.token_hex(6)}{ext}"
+        ok, _size = _save_upload_stream(file, dest, max_bytes)
+        if not ok:
+            skipped += 1
+            continue
+        repo.add_company_media(
+            company_id, company["user_id"], media_type, to_relative_path(dest),
+            original_filename=(file.filename or "")[:255], file_size_bytes=dest.stat().st_size,
+            sort_order=existing_count + i,
+        )
+        saved += 1
+    repo.write_audit_log(
+        user["id"], "company_media_uploaded", target_type="company", target_id=company_id,
+        metadata_json=f'{{"saved":{saved},"skipped":{skipped}}}',
+    )
+    if skipped:
+        return RedirectResponse(
+            url=f"/companies/{company_id}?saved=1&error=일부+파일은+지원하지+않는+형식이거나+용량+초과로+건너뛰었습니다({skipped}건).",
+            status_code=303,
+        )
+    return RedirectResponse(url=f"/companies/{company_id}?saved=1", status_code=303)
+
+
+@app.post("/companies/{company_id}/media/{media_id}/delete")
+def companies_delete_media(request: Request, company_id: int, media_id: int):
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    company = _get_owned_company_or_none(company_id, user)
+    if not company:
+        return RedirectResponse(url="/companies", status_code=303)
+    from app.db import repository as repo
+    from app.config import to_absolute_path
+    relative_path = repo.delete_company_media(media_id, company["user_id"])
+    if relative_path:
+        try:
+            to_absolute_path(relative_path).unlink(missing_ok=True)
+        except Exception:
+            pass
+        repo.write_audit_log(user["id"], "company_media_deleted", target_type="company", target_id=company_id)
+    return RedirectResponse(url=f"/companies/{company_id}?saved=1", status_code=303)
+
+
+@app.get("/companies/{company_id}/cover-image")
+def companies_cover_image(request: Request, company_id: int):
+    from fastapi import HTTPException
+    from fastapi.responses import FileResponse
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    company = _get_owned_company_or_none(company_id, user)
+    if not company or not company.get("cover_image_relative_path"):
+        raise HTTPException(status_code=404, detail="대표 이미지가 없습니다.")
+    from app.config import PathEscapeError, to_absolute_path
+    try:
+        path = to_absolute_path(company["cover_image_relative_path"])
+    except PathEscapeError:
+        raise HTTPException(status_code=404, detail="이미지 파일을 찾을 수 없습니다.")
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="이미지 파일을 찾을 수 없습니다.")
+    return FileResponse(path)
+
+
+@app.get("/companies/{company_id}/media/{media_id}")
+def companies_media_file(request: Request, company_id: int, media_id: int):
+    from fastapi import HTTPException
+    from fastapi.responses import FileResponse
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    company = _get_owned_company_or_none(company_id, user)
+    if not company:
+        raise HTTPException(status_code=404, detail="업체를 찾을 수 없습니다.")
+    from app.db import repository as repo
+    from app.config import PathEscapeError, to_absolute_path
+    media = repo.get_company_media_owned(media_id, company["user_id"]) if str(user.get("role")) != "admin" else None
+    if not media:
+        # 관리자는 소유자 무관 열람 가능 - company_id로만 재확인한다.
+        candidates = [m for m in repo.list_company_media(company_id) if m["id"] == media_id]
+        media = candidates[0] if candidates else None
+    if not media:
+        raise HTTPException(status_code=404, detail="파일을 찾을 수 없습니다.")
+    try:
+        path = to_absolute_path(media["relative_path"])
+    except PathEscapeError:
+        raise HTTPException(status_code=404, detail="파일을 찾을 수 없습니다.")
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="파일을 찾을 수 없습니다.")
+    media_type = "video/mp4" if media["media_type"] == "video" else None
+    return FileResponse(path, media_type=media_type)
+
+
+@app.get("/subscription")
+def subscription_page(request: Request, requested: int = 0):
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    from app.db import repository as repo
+
+    subscription = repo.get_active_subscription(user["id"])
+    plan_code = subscription["plan_code"] if subscription else "free"
+    monthly_limit = subscription["monthly_project_limit"] if subscription else 20
+    archive_limit = subscription["archive_item_limit"] if subscription else 10
+    month_start = datetime.now(timezone.utc).strftime("%Y-%m-01T00:00:00")
+    monthly_count = repo.count_projects_for_user_since(user["id"], month_start)
+    archive_count = repo.count_projects_by_status_for_user(user["id"])["completed"]
+    plans = repo.list_plans()
+    return templates.TemplateResponse("subscription.html", _ctx(
+        request, user, active="subscription", plan_code=plan_code, monthly_limit=monthly_limit,
+        monthly_count=monthly_count, archive_limit=archive_limit, archive_count=archive_count,
+        plans=plans, subscription=subscription, requested=requested,
+    ))
+
+
+@app.post("/subscription/upgrade-request")
+def subscription_upgrade_request(request: Request, plan_id: int = Form(...)):
+    """실제 결제는 아직 연결하지 않는다(외부 결제 연동은 이번 범위 밖). 대신 요청
+    자체는 감사로그에 실제로 남겨 관리자가 확인할 수 있게 한다(가짜 토스트만
+    보여주고 끝나는 mock 버튼으로 남겨두지 않기 위함)."""
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    from app.db import repository as repo
+    repo.write_audit_log(
+        user["id"], "subscription_upgrade_requested", target_type="subscription_plan", target_id=plan_id,
+    )
+    return RedirectResponse(url="/subscription?requested=1", status_code=303)
 
 
 def _dir_size_bytes(path: Path) -> int:
@@ -1095,7 +1462,7 @@ def admin_member_toggle_status(request: Request, member_id: int, new_status: str
     if not user:
         return RedirectResponse(url="/dashboard", status_code=303)
     if new_status not in ("active", "inactive"):
-        return RedirectResponse(url=f"/admin/members/{member_id}")
+        return RedirectResponse(url=f"/admin/members/{member_id}", status_code=303)
     from app.db import repository as repo
     target = repo.get_user_by_id(member_id)
     if target:

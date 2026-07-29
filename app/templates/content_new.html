@@ -17,23 +17,35 @@
 {% if error %}
 <div class="card" style="border-color:var(--danger);color:var(--danger);font-size:13px;margin-bottom:14px">{{ error }}</div>
 {% endif %}
-{% if not company %}
+{% if not companies %}
 <div class="card" style="border-color:var(--warn);color:var(--warn);font-size:13px;margin-bottom:14px">
-  마이페이지에 저장된 업체 정보가 없습니다. 아래 값을 직접 입력하거나, 먼저 <a href="/mypage" style="color:var(--warn)">마이페이지</a>에서 업체 정보를 저장해 두시면 자동으로 채워집니다.
+  등록된 업체가 없습니다. 먼저 <a href="/companies/new" style="color:var(--warn)">업체를 등록</a>해야 콘텐츠를 만들 수 있습니다.
 </div>
-{% endif %}
+{% else %}
+
+<form method="get" action="/content/new" class="card" style="margin-bottom:14px">
+  <div class="field" style="margin:0">
+    <label>제작에 사용할 업체</label>
+    <select name="company_id" onchange="this.form.submit()">
+      {% for c in companies %}
+      <option value="{{ c.id }}" {{ 'selected' if company and c.id == company.id }}>{{ c.company_name }}{{ ' (기본 업체)' if c.is_default else '' }}</option>
+      {% endfor %}
+    </select>
+  </div>
+</form>
 
 <form method="post" action="/content/new" class="card company-form">
-  <h3 style="margin-top:0">업체 정보 (이번 제작용, 수정 가능)</h3>
+  <input type="hidden" name="company_id" value="{{ company.id if company else '' }}">
+  <h3 style="margin-top:0">업체 정보</h3>
+  <p style="color:var(--muted);font-size:12px;margin-top:-8px">위에서 선택한 업체 정보가 그대로 사용됩니다. 업체 정보 자체를 바꾸려면 <a href="/companies/{{ company.id if company else '' }}">업체 관리</a>에서 수정해 주세요.</p>
   <div class="grid cols-2">
-    <div class="field"><label>업체명</label><input type="text" name="company_name" value="{{ company.company_name if company else '' }}"></div>
-    <div class="field"><label>담당자</label><input type="text" name="owner_name" value="{{ company.owner_name if company else '' }}"></div>
-    <div class="field"><label>전화번호</label><input type="text" name="phone_number" value="{{ company.phone_number if company else '' }}"></div>
-    <div class="field"><label>업종</label><input type="text" name="industry" value="{{ company.industry if company else '' }}"></div>
-    <div class="field"><label>지역</label><input type="text" name="region" value="{{ company.region if company else '' }}"></div>
-    <div class="field"><label>주요 서비스</label><input type="text" name="main_services" value="{{ company.main_services if company else '' }}"></div>
+    <div class="field"><label>업체명</label><input type="text" value="{{ company.company_name if company else '' }}" disabled></div>
+    <div class="field"><label>담당자</label><input type="text" value="{{ company.owner_name if company else '' }}" disabled></div>
+    <div class="field"><label>전화번호</label><input type="text" value="{{ company.phone_number if company else '' }}" disabled></div>
+    <div class="field"><label>업종</label><input type="text" value="{{ company.industry if company else '' }}" disabled></div>
+    <div class="field"><label>지역</label><input type="text" value="{{ company.region if company else '' }}" disabled></div>
+    <div class="field"><label>주요 서비스</label><input type="text" value="{{ company.main_services if company else '' }}" disabled></div>
   </div>
-  <div class="field"><label>주요 고객층</label><input type="text" name="target_customers" value="{{ company.target_customers if company else '' }}"></div>
 
   <h3>제작 조건</h3>
   <div class="field"><label>콘텐츠 주제 *</label><input type="text" name="topic" placeholder="예: 겨울철 보일러 점검 안내" required></div>
@@ -79,12 +91,29 @@
   <audio id="music-audio" controls style="width:100%;margin-top:6px;display:none"></audio>
 
   <div class="field" style="margin-top:12px">
-    <label>대표 이미지 / 동영상</label>
-    <div class="card" style="padding:12px;text-align:center;color:var(--muted);border-style:dashed">이미지·동영상 업로드는 다음 단계에서 연결됩니다.</div>
+    <label>이번 제작에 참고할 업체 사진·영상 (선택)</label>
+    {% if media %}
+    <div class="grid cols-4">
+      {% for m in media %}
+      <label class="card" style="background:var(--panel-2);padding:8px;cursor:pointer;display:block">
+        <input type="checkbox" name="media_ids" value="{{ m.id }}" style="margin-bottom:6px">
+        {% if m.media_type == 'image' %}
+        <img src="/companies/{{ company.id }}/media/{{ m.id }}" alt="{{ m.original_filename }}" style="width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:6px">
+        {% else %}
+        <video src="/companies/{{ company.id }}/media/{{ m.id }}" preload="metadata" style="width:100%;aspect-ratio:1/1;object-fit:cover;border-radius:6px;background:#000"></video>
+        {% endif %}
+      </label>
+      {% endfor %}
+    </div>
+    <p style="color:var(--muted);font-size:11px;margin-top:6px">선택한 사진·영상은 이번 작업 기록에 함께 저장됩니다. 영상 자동 제작(MP4)은 현재 단계에서는 계속 그라디언트 장면으로 만들어지며, 선택한 원본은 보관함에서 그대로 확인할 수 있습니다.</p>
+    {% else %}
+    <p style="color:var(--muted);font-size:12px">선택한 업체에 아직 업로드한 사진·영상이 없습니다. <a href="/companies/{{ company.id }}">업체 관리</a>에서 먼저 업로드할 수 있습니다.</p>
+    {% endif %}
   </div>
 
   <button class="btn" style="margin-top:18px;width:auto;padding:0 24px" type="submit" data-once>제작 시작</button>
 </form>
+{% endif %}
 {% endblock %}
 {% block scripts %}
 <script>

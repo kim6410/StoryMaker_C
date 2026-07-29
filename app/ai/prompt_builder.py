@@ -109,8 +109,10 @@ _CHANNELS_OUTPUT_CONTRACT_HEADER = """출력 형식:
 """
 
 
-def build_channels_prompt(ctx: PromptContext) -> str:
-    """6B단계: SNS 8채널 + 숏폼 영상원고를 한 번의 응답으로 요청하는 프롬프트."""
+def build_channels_prompt(ctx: PromptContext, system_rules: str | None = None) -> str:
+    """6B단계: SNS 8채널 + 숏폼 영상원고를 한 번의 응답으로 요청하는 프롬프트.
+    system_rules를 지정하지 않으면(관리자 프롬프트 관리에서 활성 버전을 찾지 못한
+    경우 등) 이 파일의 기본 하드코딩 규칙으로 안전하게 대체된다(복구 가능성 우선)."""
     lines = [_CHANNELS_OUTPUT_CONTRACT_HEADER.rstrip("\n")]
     for i, code in enumerate(CHANNEL_CODES):
         comma = "," if i < len(CHANNEL_CODES) - 1 else ""
@@ -124,15 +126,21 @@ def build_channels_prompt(ctx: PromptContext) -> str:
         "포함하지 않습니다."
     )
     contract = "\n".join(lines)
-    return "\n\n".join([_SYSTEM_RULES, _business_context_block(ctx), contract])
+    return "\n\n".join([system_rules or _SYSTEM_RULES, _business_context_block(ctx), contract])
 
 
-def build_single_channel_prompt(ctx: PromptContext, channel_code: str) -> str:
-    """6B단계: 채널 하나만 재생성할 때 쓰는 축소 프롬프트. 다른 채널 결과에는 영향을 주지 않는다."""
+def build_single_channel_prompt(ctx: PromptContext, channel_code: str, system_rules: str | None = None) -> str:
+    """6B단계: 채널 하나만 재생성할 때 쓰는 축소 프롬프트. 다른 채널 결과에는 영향을 주지 않는다.
+    system_rules 기본값 대체 규칙은 build_channels_prompt와 동일하다."""
     label = CHANNEL_LABELS.get(channel_code, channel_code)
     schema = json.dumps(_channel_slot_schema(channel_code), ensure_ascii=False, indent=2)
     contract = (
         f"출력 형식:\n\"{label}\"({channel_code}) 채널 하나만을 위한 아래 JSON 객체 하나만 응답하십시오.\n\n"
         f"{schema}\n\n모든 문자열 필드는 비어 있으면 안 됩니다."
     )
-    return "\n\n".join([_SYSTEM_RULES, _business_context_block(ctx), contract])
+    return "\n\n".join([system_rules or _SYSTEM_RULES, _business_context_block(ctx), contract])
+
+
+def default_system_rules() -> str:
+    """관리자 프롬프트 관리 초기 마이그레이션·미리보기 기본값에서 사용하는 원본 규칙 텍스트."""
+    return _SYSTEM_RULES

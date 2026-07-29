@@ -28,6 +28,16 @@ from app.constants import (
 
 RESULTS: list[tuple[str, bool, str]] = []
 
+# 셀프테스트 전용 고유 식별자. 실제 운영 데이터(특히 free/starter 플랜은 실제 사용자
+# 구독이 FK로 참조하므로) 절대 건드리지 않기 위해 운영 코드와 절대 겹치지 않는
+# 이름을 쓴다. 이 식별자들만으로 "테스트가 만든 데이터"를 항상 정확히 골라낼 수
+# 있어야 한다(운영 데이터와 이름이 충돌하지 않는 한 안전하다).
+SELFTEST_EMAIL = "selftest@example.com"
+SELFTEST_PLAN_CODE_FREE = "selftest_free"
+SELFTEST_PLAN_CODE_STARTER = "selftest_starter"
+SELFTEST_AUDIT_TARGET_TYPE = "selftest"
+SELFTEST_AUDIT_ACTION = "selftest_action"
+
 
 def check(name: str, condition: bool, detail: str = "") -> None:
     RESULTS.append((name, condition, detail))
@@ -35,29 +45,44 @@ def check(name: str, condition: bool, detail: str = "") -> None:
     print(f"[{mark}] {name} {detail}")
 
 
-def _reset_previous_selftest_data() -> None:
-    """반복 실행 가능하도록 이전 셀프테스트 잔여 데이터만 선택적으로 정리한다."""
+def _sweep_selftest_artifacts() -> None:
+    """셀프테스트 전용 흔적만 정리한다. 실제 운영 free/starter 플랜과 실제 사용자는
+    절대 건드리지 않는다(과거 버그: 운영 코드와 같은 'free'/'starter'를 지우려다
+    실제 구독이 참조 중이면 FK 위반으로 실패했다 - 지금은 운영 코드와 겹치지 않는
+    전용 코드만 사용한다). 사용자를 먼저 지워야 그 사용자의 구독·프로젝트·보관함
+    항목이 CASCADE로 함께 정리되고, 그다음에 테스트 전용 플랜을 지워야 FK 위반이
+    나지 않는다(이 시점엔 더 이상 그 플랜을 참조하는 구독이 없다). 매 실행 시작과
+    끝에 모두 호출해 이전 비정상 종료 잔여물과 이번 실행 흔적을 항상 없앤다."""
     from app.db.connection import get_connection
     with get_connection() as conn:
-        conn.execute("DELETE FROM subscription_plans WHERE code IN ('free', 'starter')")
-        conn.execute("DELETE FROM users WHERE email='selftest@example.com'")
+        conn.execute("DELETE FROM users WHERE email=?", (SELFTEST_EMAIL,))
+        conn.execute(
+            "DELETE FROM subscription_plans WHERE code IN (?, ?)",
+            (SELFTEST_PLAN_CODE_FREE, SELFTEST_PLAN_CODE_STARTER),
+        )
+        conn.execute("DELETE FROM audit_logs WHERE target_type=?", (SELFTEST_AUDIT_TARGET_TYPE,))
+        conn.execute("DELETE FROM audit_logs WHERE action=?", (SELFTEST_AUDIT_ACTION,))
 
 
 def run_crud_test() -> None:
     print("\n=== 1. 마이그레이션 ===")
     applied = run_migrations()
     check("migrations_applied_or_already_current", True, f"newly_applied={applied}, all={sorted(applied_versions())}")
-    _reset_previous_selftest_data()
 
     print("\n=== 2. 샘플 데이터 CRUD ===")
-    plan_free = repo.create_plan("free", "Free", monthly_project_limit=20, archive_item_limit=10, price_krw=0, sort_order=10)
-    plan_starter = repo.create_plan("starter", "Starter", monthly_project_limit=20, archive_item_limit=20, price_krw=29000, sort_order=20)
+    plan_free = repo.create_plan(SELFTEST_PLAN_CODE_FREE, "Selftest Free", monthly_project_limit=20, archive_item_limit=10, price_krw=0, sort_order=9990)
+    plan_starter = repo.create_plan(SELFTEST_PLAN_CODE_STARTER, "Selftest Starter", monthly_project_limit=20, archive_item_limit=20, price_krw=29000, sort_order=9991)
     check("create_plan", plan_free > 0 and plan_starter > 0, f"free_id={plan_free} starter_id={plan_starter}")
 
     plans = repo.list_plans()
-    check("list_plans_count", len(plans) == 2, f"count={len(plans)}")
+    plan_ids = {p["id"] for p in plans}
+    check(
+        "list_plans_contains_created_plans",
+        plan_free in plan_ids and plan_starter in plan_ids,
+        f"free={plan_free} starter={plan_starter} total_active_plans={len(plans)} (실제 운영 플랜과 함께 조회되므로 전체 개수가 아니라 포함 여부로 검사)",
+    )
 
-    user_id = repo.create_user("selftest@example.com", "argon2-placeholder-hash", "셀프테스트 사용자")
+    user_id = repo.create_user(SELFTEST_EMAIL, "argon2-placeholder-hash", "셀프테스트 사용자")
     check("create_user", user_id > 0, f"user_id={user_id}")
 
     fetched = repo.get_user_by_email("selftest@example.com")
@@ -69,7 +94,7 @@ def run_crud_test() -> None:
     sub_id = repo.assign_subscription(user_id, plan_free, "2026-07-28T00:00:00+00:00", "2026-08-27T00:00:00+00:00")
     check("assign_subscription", sub_id > 0)
     active_sub = repo.get_active_subscription(user_id)
-    check("get_active_subscription_plan_code", active_sub is not None and active_sub["plan_code"] == "free")
+    check("get_active_subscription_plan_code", active_sub is not None and active_sub["plan_code"] == SELFTEST_PLAN_CODE_FREE)
 
     project = repo.create_project(user_id, "셀프테스트 프로젝트")
     check("create_project", project["id"] > 0 and project["job_uid"].startswith("proj_"))
@@ -95,7 +120,7 @@ def run_crud_test() -> None:
     remaining = repo.list_archive_items_for_user(user_id, exclude_deleted=True)
     check("mark_archive_item_deleted_excludes_from_list", all(r["id"] != item_id for r in remaining))
 
-    log_id = repo.write_audit_log(user_id, "selftest_action", target_type="project", target_id=project["id"])
+    log_id = repo.write_audit_log(user_id, SELFTEST_AUDIT_ACTION, target_type="project", target_id=project["id"])
     check("write_audit_log", log_id > 0)
     logs = repo.list_audit_logs(limit=5)
     check("list_audit_logs", len(logs) >= 1)
@@ -129,7 +154,7 @@ def run_concurrency_test(thread_count: int = 20) -> None:
 
     def worker(i: int) -> None:
         try:
-            repo.write_audit_log(None, f"concurrency_test_{i}", target_type="selftest")
+            repo.write_audit_log(None, f"concurrency_test_{i}", target_type=SELFTEST_AUDIT_TARGET_TYPE)
         except Exception as exc:  # noqa: BLE001
             errors.append(f"thread_{i}: {exc}")
 
@@ -149,9 +174,16 @@ def run_concurrency_test(thread_count: int = 20) -> None:
 
 
 def main() -> int:
-    run_crud_test()
-    run_integrity_test()
-    run_concurrency_test()
+    # 시작 시 안전망: 직전 실행이 예외나 강제종료로 finally를 못 거쳤을 경우를 대비해
+    # 셀프테스트 전용 흔적만 먼저 정리한다(실제 운영 데이터는 대상이 아니므로 안전).
+    _sweep_selftest_artifacts()
+    try:
+        run_crud_test()
+        run_integrity_test()
+        run_concurrency_test()
+    finally:
+        # 실패하더라도 이번 실행이 만든 셀프테스트 흔적은 항상 정리한다.
+        _sweep_selftest_artifacts()
 
     failed = [r for r in RESULTS if not r[1]]
     print(f"\n=== 결과 요약: {len(RESULTS) - len(failed)}/{len(RESULTS)} PASS ===")

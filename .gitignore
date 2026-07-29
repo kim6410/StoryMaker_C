@@ -5,6 +5,7 @@ data/
 logs/
 backups/
 temp/
+uploads/
 *.db
 *.db-wal
 *.db-shm

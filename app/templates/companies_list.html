@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}업체 관리 - {{ app_name }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>업체 관리</h1>
+  <p>콘텐츠 제작에 사용할 업체를 여러 개 등록하고 관리할 수 있습니다.</p>
+</div>
+
+{% if saved %}
+<div class="card" style="border-color:var(--ok);color:var(--ok);font-size:13px;margin-bottom:14px">저장되었습니다.</div>
+{% endif %}
+
+<div style="margin-bottom:16px">
+  <a class="btn" style="width:auto;padding:0 20px" href="/companies/new">+ 새 업체 등록</a>
+</div>
+
+{% if companies %}
+<div class="grid cols-3">
+  {% for c in companies %}
+  <div class="card" style="{{ 'opacity:.55' if not c.is_active }}">
+    {% if c.cover_image_relative_path %}
+    <img src="/companies/{{ c.id }}/cover-image" alt="{{ c.company_name }} 대표 이미지"
+         style="width:100%;aspect-ratio:16/9;object-fit:cover;border-radius:10px;margin-bottom:10px">
+    {% else %}
+    <div style="aspect-ratio:16/9;border-radius:10px;background:var(--panel-2);margin-bottom:10px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:12px">대표 이미지 없음</div>
+    {% endif %}
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:6px">
+      <b style="font-size:15px">{{ c.company_name }}</b>
+      {% if c.is_default %}<span class="badge ok">기본 업체</span>{% endif %}
+      {% if not c.is_active %}<span class="badge muted">비활성</span>{% endif %}
+    </div>
+    <p style="color:var(--muted);font-size:12px;margin:6px 0">{{ c.industry or '업종 미입력' }} · {{ c.region or '지역 미입력' }}</p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+      <a class="btn ghost" href="/companies/{{ c.id }}">상세·수정</a>
+      {% if not c.is_default and c.is_active %}
+      <form method="post" action="/companies/{{ c.id }}/default" style="margin:0">
+        <button class="btn ghost" type="submit" data-once>기본으로 선택</button>
+      </form>
+      {% endif %}
+      <form method="post" action="/companies/{{ c.id }}/active" style="margin:0">
+        <input type="hidden" name="is_active" value="{{ '0' if c.is_active else '1' }}">
+        <button class="btn ghost" type="submit" data-once>{{ '비활성화' if c.is_active else '다시 활성화' }}</button>
+      </form>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty">
+  아직 등록된 업체가 없습니다.<br>
+  <a class="btn" style="width:auto;padding:0 20px;margin-top:14px;display:inline-flex" href="/companies/new">첫 업체 등록하기</a>
+</div>
+{% endif %}
+{% endblock %}

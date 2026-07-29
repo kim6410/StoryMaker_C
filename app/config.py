@@ -19,6 +19,13 @@ JOBS_DIR = DATA_DIR / "jobs"
 MEDIA_DIR = DATA_DIR / "media"
 LOGS_DIR = PROJECT_ROOT / "logs"
 BACKUPS_DIR = PROJECT_ROOT / "backups"
+UPLOADS_DIR = PROJECT_ROOT / "uploads"
+
+# 업체 대표 이미지·콘텐츠용 사진/영상 업로드 제약(단계11).
+COMPANY_IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+COMPANY_VIDEO_EXTENSIONS = {".mp4", ".mov", ".webm"}
+COMPANY_IMAGE_MAX_BYTES = 10 * 1024 * 1024
+COMPANY_VIDEO_MAX_BYTES = 200 * 1024 * 1024
 
 # 공용 배경음악 라이브러리. 용량을 줄이기 위해 data/ 안으로 복사하지 않고
 # runtime/music/mp3를 읽기 전용으로 그대로 참조한다.
@@ -63,7 +70,7 @@ FONT_REGULAR_PATH = PROJECT_ROOT / "runtime" / "fonts" / "NanumGothic-Regular.tt
 MUSIC_DUCKED_VOLUME = {"quiet": 0.08, "normal": 0.14, "loud": 0.20}
 MUSIC_SOLO_VOLUME = {"quiet": 0.30, "normal": 0.45, "loud": 0.60}
 
-for _d in (DATA_DIR, JOBS_DIR, MEDIA_DIR, LOGS_DIR, BACKUPS_DIR):
+for _d in (DATA_DIR, JOBS_DIR, MEDIA_DIR, LOGS_DIR, BACKUPS_DIR, UPLOADS_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 
 

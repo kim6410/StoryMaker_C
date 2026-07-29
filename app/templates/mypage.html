@@ -3,50 +3,39 @@
 {% block content %}
 <div class="page-head">
   <h1>마이페이지</h1>
-  <p>콘텐츠 제작에 사용할 업체 정보를 관리합니다.</p>
+  <p>계정 정보와 현재 기본 업체를 확인합니다. 업체 등록·수정은 업체 관리에서 합니다.</p>
 </div>
 
 <div class="tabs" data-tabs>
-  <button class="tab {{ 'active' if tab != 'account' else '' }}" data-tab="profile">업체 정보</button>
+  <button class="tab {{ 'active' if tab != 'account' else '' }}" data-tab="profile">업체</button>
   <button class="tab {{ 'active' if tab == 'account' else '' }}" data-tab="account">계정</button>
 </div>
 
 {% if saved %}
-<div class="card" style="border-color:var(--ok);color:var(--ok);font-size:13px;margin-bottom:14px">업체 정보를 저장했습니다.</div>
+<div class="card" style="border-color:var(--ok);color:var(--ok);font-size:13px;margin-bottom:14px">저장했습니다.</div>
 {% endif %}
 {% if error and tab != 'account' %}
 <div class="card" style="border-color:var(--danger);color:var(--danger);font-size:13px;margin-bottom:14px">{{ error }}</div>
 {% endif %}
 
-<div data-tab-panel="profile" class="card company-form" style="display:{{ 'none' if tab == 'account' else '' }}">
-  <form method="post" action="/mypage/company">
-    <div class="grid cols-2">
-      <div class="field"><label>업체명 *</label><input type="text" name="company_name" value="{{ company.company_name if company else '' }}" required></div>
-      <div class="field"><label>대표자명</label><input type="text" name="owner_name" value="{{ company.owner_name if company else '' }}"></div>
-      <div class="field"><label>전화번호</label><input type="text" name="phone_number" value="{{ company.phone_number if company else '' }}"></div>
-      <div class="field">
-        <label>업종</label>
-        <select name="industry">
-          {% set cur_industry = company.industry if company else '' %}
-          {% for key, label in [('general','일반 업종'),('home_repair','집수리·인테리어'),('boiler_facility','보일러·설비'),('appliance_clean','가전 청소'),('general_cleaning','청소'),('restaurant','음식점'),('cafe','카페'),('beauty_wellness','미용·웰니스'),('car_repair','자동차 정비'),('pet_beauty_hotel','반려동물'),('real_estate','부동산'),('education_academy','교육·학원')] %}
-          <option value="{{ key }}" {{ 'selected' if cur_industry == key else '' }}>{{ label }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div class="field"><label>지역</label><input type="text" name="region" value="{{ company.region if company else '' }}" placeholder="예: 서울 강북구"></div>
-      <div class="field"><label>주소</label><input type="text" name="address" value="{{ company.address if company else '' }}"></div>
+<div data-tab-panel="profile" class="card" style="display:{{ 'none' if tab == 'account' else '' }}">
+  <h3 style="margin-top:0">현재 기본 업체</h3>
+  {% if company %}
+  <div style="display:flex;gap:14px;align-items:center;flex-wrap:wrap">
+    {% if company.cover_image_relative_path %}
+    <img src="/companies/{{ company.id }}/cover-image" alt="{{ company.company_name }}" style="width:96px;height:72px;object-fit:cover;border-radius:8px">
+    {% endif %}
+    <div>
+      <b style="font-size:15px">{{ company.company_name }}</b>
+      <p style="color:var(--muted);font-size:12px;margin:4px 0 0">{{ company.industry or '업종 미입력' }} · {{ company.region or '지역 미입력' }}</p>
     </div>
-    <div class="field"><label>주요 서비스</label><input type="text" name="main_services" value="{{ company.main_services if company else '' }}" placeholder="쉼표로 구분"></div>
-    <div class="field"><label>고객층</label><input type="text" name="target_customers" value="{{ company.target_customers if company else '' }}"></div>
-    <div class="field"><label>핵심 강점 / 소개글</label><textarea name="core_strength">{{ company.core_strength if company else '' }}</textarea></div>
-    <div class="grid cols-2">
-      <div class="field"><label>원하는 말투</label><input type="text" name="tone_preference" value="{{ company.tone_preference if company else '' }}" placeholder="예: 친근한 존댓말"></div>
-      <div class="field"><label>금지 표현</label><input type="text" name="forbidden_words" value="{{ company.forbidden_words if company else '' }}"></div>
-    </div>
-    <div class="field"><label>홈페이지 및 SNS 주소</label><input type="text" name="website_url" value="{{ company.website_url if company else '' }}"></div>
-    <div class="field"><label>자유 요청사항</label><textarea name="free_request">{{ company.free_request if company else '' }}</textarea></div>
-    <button class="btn" style="width:auto;padding:0 20px" type="submit">저장</button>
-  </form>
+  </div>
+  {% else %}
+  <p style="color:var(--muted);font-size:13px">아직 등록된 업체가 없습니다. 콘텐츠를 만들려면 먼저 업체를 등록해 주세요.</p>
+  {% endif %}
+  <div style="margin-top:14px">
+    <a class="btn secondary" style="width:auto;padding:0 20px" href="/companies">업체 관리로 이동</a>
+  </div>
 </div>
 
 <div data-tab-panel="account" class="card" style="display:{{ '' if tab == 'account' else 'none' }}">

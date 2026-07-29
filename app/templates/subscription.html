@@ -6,11 +6,27 @@
   <p>현재 플랜과 이번 달 사용량을 확인합니다.</p>
 </div>
 
+{% if requested %}
+<div class="card" style="border-color:var(--ok);color:var(--ok);font-size:13px;margin-bottom:14px">업그레이드 요청이 접수되었습니다. 관리자가 확인 후 안내드립니다.</div>
+{% endif %}
+
 <div class="grid cols-3">
-  <div class="card stat"><div class="num">Free</div><div class="label">현재 플랜</div></div>
-  <div class="card stat"><div class="num">3 / 20</div><div class="label">이번 달 제작 사용량</div></div>
-  <div class="card stat"><div class="num">10개</div><div class="label">보관함 최근 유지 개수</div></div>
+  <div class="card stat"><div class="num">{{ plans | selectattr('code','equalto',plan_code) | map(attribute='name') | first | default(plan_code) }}</div><div class="label">현재 플랜</div></div>
+  <div class="card stat"><div class="num">{{ monthly_count }} / {{ monthly_limit }}</div><div class="label">이번 달 제작(참고용 한도)</div></div>
+  <div class="card stat"><div class="num">{{ archive_count }} / {{ archive_limit }}</div><div class="label">보관함 사용량</div></div>
 </div>
+
+{% if subscription %}
+<div class="card" style="margin-top:16px">
+  <h3 style="margin-top:0">구독 기간</h3>
+  <table>
+    <tbody>
+      <tr><td>시작일</td><td>{{ subscription.period_started_at[:10] if subscription.period_started_at else '-' }}</td></tr>
+      <tr><td>종료일</td><td>{{ subscription.period_ends_at[:10] if subscription.period_ends_at else '-' }}</td></tr>
+    </tbody>
+  </table>
+</div>
+{% endif %}
 
 <div class="card" style="margin-top:16px">
   <h3 style="margin-top:0">플랜 비교</h3>
@@ -18,12 +34,25 @@
   <table>
     <thead><tr><th>플랜</th><th>월 제작 한도</th><th>보관함 한도</th><th>가격</th><th></th></tr></thead>
     <tbody>
-      <tr><td>Free</td><td>20회</td><td>최신 10개</td><td>0원</td><td><span class="badge ok">현재 플랜</span></td></tr>
-      <tr><td>Starter</td><td>20회</td><td>최신 20개</td><td>29,000원</td><td><button class="btn ghost" data-toast-msg="업그레이드 신청 (샘플)">업그레이드</button></td></tr>
-      <tr><td>Standard</td><td>20회</td><td>최신 20개</td><td>59,000원</td><td><button class="btn ghost" data-toast-msg="업그레이드 신청 (샘플)">업그레이드</button></td></tr>
+      {% for p in plans %}
+      <tr>
+        <td>{{ p.name }}</td><td>{{ p.monthly_project_limit }}회</td>
+        <td>최신 {{ p.archive_item_limit }}개</td><td>{{ '{:,}'.format(p.price_krw) }}원</td>
+        <td>
+          {% if p.code == plan_code %}
+          <span class="badge ok">현재 플랜</span>
+          {% else %}
+          <form method="post" action="/subscription/upgrade-request" style="margin:0">
+            <input type="hidden" name="plan_id" value="{{ p.id }}">
+            <button class="btn ghost" type="submit" data-once>업그레이드 요청</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
     </tbody>
   </table>
   </div>
-  <div style="color:var(--muted);font-size:12px;margin-top:10px">플랜별 보관 한도는 관리자 설정으로 자유롭게 조정됩니다.</div>
+  <div style="color:var(--muted);font-size:12px;margin-top:10px">업그레이드 요청을 보내면 관리자에게 기록되며, 실제 플랜 변경은 관리자가 회원관리에서 처리합니다(온라인 결제는 아직 연결되지 않았습니다).</div>
 </div>
 {% endblock %}

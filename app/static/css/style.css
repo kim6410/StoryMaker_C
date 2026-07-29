@@ -60,12 +60,6 @@ button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit
 .topbar-right{display:flex;align-items:center;gap:12px}
 .user-chip{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
 .user-chip b{color:var(--text)}
-.bell{
-  width:36px;height:36px;border-radius:10px;border:1px solid var(--border);
-  display:flex;align-items:center;justify-content:center;position:relative;cursor:pointer;
-}
-.bell .dot{position:absolute;top:6px;right:6px;width:7px;height:7px;border-radius:50%;background:var(--danger)}
-
 .sidebar{
   position:fixed;top:var(--header-h);left:0;bottom:0;width:var(--sidebar-w);
   background:var(--panel);border-right:1px solid var(--border);padding:16px 10px;
@@ -80,7 +74,8 @@ button,input,select,textarea{font-family:inherit;font-size:inherit;color:inherit
 .nav-item.active{background:rgba(94,200,255,.12);color:var(--accent)}
 .nav-item.admin{color:var(--accent-2)}
 .nav-item.admin.active{background:rgba(127,255,212,.14);color:var(--accent-2)}
-.nav-icon{width:18px;text-align:center;flex:none}
+.nav-icon{width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;flex:none;opacity:.85}
+.nav-item.active .nav-icon,.nav-item:hover .nav-icon{opacity:1}
 
 .content{margin-left:var(--sidebar-w);padding:calc(var(--header-h) + 20px) 24px 60px}
 .overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:25}

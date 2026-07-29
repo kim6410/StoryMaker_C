@@ -1,0 +1,24 @@
+{# 단계11: 사이드 메뉴용 최소 SVG 아이콘 세트. 전부 이 프로젝트 안에서 직접 그린
+   16x16 stroke 아이콘이며(currentColor 상속), 외부 파일이나 V1·Beta 아이콘을
+   복사하지 않았다. #}
+{% macro nav_icon(key) %}
+{%- if key == 'grid' -%}
+<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="1.5" y="1.5" width="5.5" height="5.5" rx="1"/><rect x="9" y="1.5" width="5.5" height="5.5" rx="1"/><rect x="1.5" y="9" width="5.5" height="5.5" rx="1"/><rect x="9" y="9" width="5.5" height="5.5" rx="1"/></svg>
+{%- elif key == 'plus' -%}
+<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M8 2.5v11M2.5 8h11"/></svg>
+{%- elif key == 'clock' -%}
+<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6.2"/><path d="M8 4.5V8l3 1.8"/></svg>
+{%- elif key == 'folder' -%}
+<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M1.8 4.2c0-.7.6-1.3 1.3-1.3h3l1.3 1.6h6.6c.7 0 1.3.6 1.3 1.3v6.7c0 .7-.6 1.3-1.3 1.3H3.1c-.7 0-1.3-.6-1.3-1.3z"/></svg>
+{%- elif key == 'building' -%}
+<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><rect x="3" y="1.8" width="7" height="12.4"/><path d="M10 6.5h3v7.7h-3M5.2 4.5h1.2M8 4.5h1.2M5.2 7.2h1.2M8 7.2h1.2M5.2 9.9h1.2M8 9.9h1.2"/></svg>
+{%- elif key == 'user' -%}
+<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="5.3" r="2.6"/><path d="M2.6 13.5c.9-2.6 3-4 5.4-4s4.5 1.4 5.4 4" stroke-linecap="round"/></svg>
+{%- elif key == 'chart' -%}
+<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 13.5h12M4.2 13.5V8M8 13.5V4.2M11.8 13.5V9.8"/></svg>
+{%- elif key == 'shield' -%}
+<svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M8 1.8l5 1.8v4c0 3.4-2.1 5.9-5 6.6-2.9-.7-5-3.2-5-6.6v-4z"/></svg>
+{%- else -%}
+<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor"><circle cx="8" cy="8" r="2.2"/></svg>
+{%- endif -%}
+{% endmacro %}
