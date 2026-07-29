@@ -67,41 +67,6 @@ ADMIN_MENU = [
     {"key": "admin_storage", "label": "저장공간·감사로그", "href": "/admin/storage", "icon": "folder"},
 ]
 
-# 3단계에서는 콘텐츠 제작·보관함 화면을 아직 실제 DB와 연결하지 않으므로
-# 화면 자체는 1단계와 동일한 샘플 데이터를 계속 사용한다(다음 단계 범위).
-SAMPLE_CHANNELS = [
-    {"key": "naver_blog", "name": "네이버 블로그", "title": "강북구 사장님이 추천하는 겨울철 보일러 점검 꿀팁", "body": "안녕하세요, 오박사만능설비입니다. 요즘처럼 기온이 뚝 떨어지는 시기에는 보일러 점검이 특히 중요한데요...", "hashtags": "#강북구보일러 #보일러점검 #겨울철난방"},
-    {"key": "naver_place", "name": "네이버 플레이스", "title": "오박사만능설비 - 강북구 보일러 전문", "body": "강북구 전 지역 출장 가능, 당일 방문 점검 가능합니다.", "hashtags": "#출장수리 #당일방문"},
-    {"key": "google_business", "name": "구글 비즈니스 프로필", "title": "Trusted Boiler Repair in Gangbuk-gu", "body": "Same-day visit available across Gangbuk-gu. 15 years of experience.", "hashtags": "#BoilerRepair #Gangbuk"},
-    {"key": "instagram", "name": "인스타그램", "title": "보일러 점검, 미루지 마세요 🔥", "body": "오늘도 강북구 곳곳을 누비는 오박사만능설비입니다! 저장해두고 필요할 때 연락주세요 📌", "hashtags": "#강북구맛집아님 #보일러 #설비사장님"},
-    {"key": "facebook", "name": "페이스북", "title": "겨울철 보일러 고장, 왜 갑자기 생길까요?", "body": "매년 이맘때 문의가 폭주하는 이유를 정리해봤습니다.", "hashtags": "#보일러고장 #강북구설비"},
-    {"key": "danggeun", "name": "당근 비즈프로필", "title": "강북구 보일러 수리 - 오박사만능설비", "body": "동네에서 15년째 영업 중입니다. 이웃 주민분들께 특별 할인 진행해요.", "hashtags": "#동네설비 #강북구이웃"},
-    {"key": "kakao_channel", "name": "카카오채널", "title": "[알림] 12월 보일러 무료 점검 이벤트", "body": "채널 추가하시면 출장비 5,000원 할인해드려요.", "hashtags": "#카카오채널이벤트"},
-    {"key": "shortform", "name": "숏폼/Reels 설명문", "title": "보일러 소리가 이상하다면? 3가지만 확인하세요", "body": "영상으로 쉽게 알려드립니다. 자세한 내용은 프로필 링크 확인!", "hashtags": "#보일러꿀팁 #숏폼"},
-]
-
-SAMPLE_ARCHIVE_ITEMS = [
-    {"id": "job-sample-0001", "title": "겨울철 보일러 점검 콘텐츠", "company": "오박사만능설비", "created_at": "2026-07-27 14:20", "status": "완료", "media": ["이미지 4장", "음성", "자막", "MP4", "썸네일"], "size": "38.2MB"},
-    {"id": "job-sample-0002", "title": "여름철 에어컨 청소 안내", "company": "오박사만능설비", "created_at": "2026-07-25 09:05", "status": "완료", "media": ["이미지 3장", "음성", "자막", "MP4", "썸네일"], "size": "29.7MB"},
-    {"id": "job-sample-0003", "title": "강북구 배관 누수 출장 후기", "company": "오박사만능설비", "created_at": "2026-07-20 18:41", "status": "완료", "media": ["이미지 5장", "음성", "자막", "MP4", "썸네일"], "size": "41.0MB"},
-]
-
-SAMPLE_ARCHIVE_DETAIL = {
-    "job-sample-0001": {
-        "title": "겨울철 보일러 점검 콘텐츠",
-        "company": "오박사만능설비",
-        "created_at": "2026-07-27 14:20",
-        "channels": SAMPLE_CHANNELS,
-        "assets": {
-            "images": ["원본 4장", "워터마크 4장"],
-            "audio": "voice.mp3 (2:14)",
-            "subtitle": "subtitle.srt",
-            "video": "final.mp4 (9:16, 0:38)",
-            "thumbnail": "thumbnail_03.png",
-        },
-    }
-}
-
 def _ctx(request: Request, user: dict, *, active: str = "", **extra) -> dict:
     admin_menu = ADMIN_MENU if str(user.get("role")) == "admin" else []
     return {
@@ -757,28 +722,118 @@ async def content_job_mp4_render_diagnostics(request: Request, job_uid: str):
     return {"ok": True}
 
 
-@app.get("/content/channels")
-def content_channels_page(request: Request):
+@app.get("/content/job/{job_uid}/thumbnail")
+def content_job_thumbnail_page(request: Request, job_uid: str, thumb_error: str = "", saved: int = 0,
+                                selected_index: int = -1):
     user = _require_login_or_redirect(request)
     if not user:
         return RedirectResponse(url="/login", status_code=303)
-    return templates.TemplateResponse("content_channels.html", _ctx(request, user, active="content_new", channels=SAMPLE_CHANNELS))
+    project = _get_owned_project_or_none(job_uid, user)
+    if not project:
+        return RedirectResponse(url="/content/new")
+
+    from app.db import repository as repo
+    from app.media import thumbnail_service as thumbsvc
+
+    primary = repo.get_primary_thumbnail_for_project(project["id"])
+    has_candidates = thumbsvc.candidates_ready(job_uid)
+    thumb_error_message = thumbsvc.USER_THUMBNAIL_ERROR_MESSAGES.get(thumb_error, "")
+
+    from app.content.steps import build_step_states
+    return templates.TemplateResponse("content_thumbnail.html", _ctx(
+        request, user, active="content_new", project=project, primary=primary,
+        has_candidates=has_candidates, candidate_indexes=list(range(thumbsvc.CANDIDATE_COUNT)),
+        thumb_error_message=thumb_error_message, saved=saved, selected_index=selected_index,
+        steps=build_step_states(project),
+    ))
 
 
-@app.get("/content/media")
-def content_media_page(request: Request):
+@app.post("/content/job/{job_uid}/thumbnail/generate")
+def content_job_thumbnail_generate(request: Request, job_uid: str):
     user = _require_login_or_redirect(request)
     if not user:
         return RedirectResponse(url="/login", status_code=303)
-    return templates.TemplateResponse("content_media.html", _ctx(request, user, active="content_new"))
+    project = _get_owned_project_or_none(job_uid, user)
+    if not project:
+        return RedirectResponse(url="/content/new")
+
+    from app.media import thumbnail_service as thumbsvc
+    from app.db import repository as repo
+    outcome = thumbsvc.ensure_candidates(project)
+    repo.write_audit_log(
+        user["id"], "thumbnail_candidates_generated", target_type="project", target_id=project["id"],
+        metadata_json=f'{{"ok": {str(outcome.ok).lower()}, "error_code": "{outcome.error_code}"}}',
+    )
+    if outcome.ok:
+        return RedirectResponse(url=f"/content/job/{job_uid}/thumbnail", status_code=303)
+    return RedirectResponse(url=f"/content/job/{job_uid}/thumbnail?thumb_error={outcome.error_code}", status_code=303)
 
 
-@app.get("/content/thumbnail")
-def content_thumbnail_page(request: Request):
+@app.post("/content/job/{job_uid}/thumbnail/select")
+def content_job_thumbnail_select(request: Request, job_uid: str, candidate_index: int = Form(...)):
     user = _require_login_or_redirect(request)
     if not user:
         return RedirectResponse(url="/login", status_code=303)
-    return templates.TemplateResponse("content_thumbnail.html", _ctx(request, user, active="content_new", candidates=list(range(1, 9))))
+    project = _get_owned_project_or_none(job_uid, user)
+    if not project:
+        return RedirectResponse(url="/content/new")
+
+    from app.media import thumbnail_service as thumbsvc
+    from app.db import repository as repo
+    outcome = thumbsvc.select_candidate(project, user["id"], candidate_index)
+    repo.write_audit_log(
+        user["id"], "thumbnail_selected", target_type="project", target_id=project["id"],
+        metadata_json=f'{{"ok": {str(outcome.ok).lower()}, "candidate_index": {candidate_index}}}',
+    )
+    if outcome.ok:
+        return RedirectResponse(
+            url=f"/content/job/{job_uid}/thumbnail?saved=1&selected_index={candidate_index}", status_code=303
+        )
+    return RedirectResponse(url=f"/content/job/{job_uid}/thumbnail?thumb_error={outcome.error_code}", status_code=303)
+
+
+@app.get("/content/job/{job_uid}/thumbnail/candidate/{index}")
+def content_job_thumbnail_candidate_image(request: Request, job_uid: str, index: int):
+    from fastapi import HTTPException
+    from fastapi.responses import FileResponse
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    project = _get_owned_project_or_none(job_uid, user)
+    if not project:
+        raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
+
+    from app.media import thumbnail_service as thumbsvc
+    path = thumbsvc.candidate_path(job_uid, index)
+    if not path:
+        raise HTTPException(status_code=404, detail="썸네일 후보를 찾을 수 없습니다.")
+    return FileResponse(path, media_type="image/jpeg")
+
+
+@app.get("/content/job/{job_uid}/thumbnail/image")
+def content_job_thumbnail_image(request: Request, job_uid: str):
+    """대표 썸네일 이미지(보관함 카드·상세·다운로드에서 공통으로 사용)."""
+    from fastapi import HTTPException
+    from fastapi.responses import FileResponse
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    project = _get_owned_project_or_none(job_uid, user)
+    if not project:
+        raise HTTPException(status_code=404, detail="작업을 찾을 수 없습니다.")
+
+    from app.db import repository as repo
+    from app.config import PathEscapeError, to_absolute_path
+    thumb = repo.get_primary_thumbnail_for_project(project["id"])
+    if not thumb:
+        raise HTTPException(status_code=404, detail="대표 썸네일이 아직 없습니다.")
+    try:
+        path = to_absolute_path(thumb["relative_path"])
+    except PathEscapeError:
+        raise HTTPException(status_code=404, detail="썸네일 파일을 찾을 수 없습니다.")
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="썸네일 파일을 찾을 수 없습니다.")
+    return FileResponse(path, media_type="image/jpeg", filename="thumbnail.jpg")
 
 
 @app.get("/archive")
@@ -805,6 +860,7 @@ def archive_list_page(request: Request, status: str = "all"):
             continue
         snapshot = _json.loads(p.get("input_snapshot_json") or "{}")
         mp4 = repo.get_mp4_for_project(p["id"]) if bucket == "completed" else None
+        thumb = repo.get_primary_thumbnail_for_project(p["id"]) if bucket == "completed" else None
         items.append({
             "job_uid": p["job_uid"], "title": p["title"],
             "company": snapshot.get("company_name", "-"),
@@ -812,6 +868,7 @@ def archive_list_page(request: Request, status: str = "all"):
             "status": p["status"], "bucket": bucket,
             "duration": f"{mp4['duration_seconds']:.0f}초" if mp4 and mp4["status"] == "success" else "-",
             "size_mb": round(mp4["file_size_bytes"] / 1024 / 1024, 1) if mp4 and mp4["status"] == "success" else None,
+            "has_thumbnail": bool(thumb),
         })
 
     return templates.TemplateResponse("archive_list.html", _ctx(
@@ -842,10 +899,11 @@ def archive_detail_page(request: Request, job_uid: str):
     srt = repo.get_srt_for_project(project["id"])
     mp4 = repo.get_mp4_for_project(project["id"])
     music_mix = repo.get_music_mix_for_project(project["id"])
+    thumbnail = repo.get_primary_thumbnail_for_project(project["id"])
 
     return templates.TemplateResponse("archive_detail.html", _ctx(
         request, user, active="archive", project=project, snapshot=snapshot, channels=channels,
-        master=master, srt=srt, mp4=mp4, music_mix=music_mix,
+        master=master, srt=srt, mp4=mp4, music_mix=music_mix, thumbnail=thumbnail,
     ))
 
 

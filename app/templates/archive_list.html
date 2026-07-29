@@ -17,9 +17,14 @@
 <div class="grid cols-3">
   {% for item in items %}
   <a class="card" href="/archive/{{ item.job_uid }}" style="display:block">
+    {% if item.has_thumbnail %}
+    <img src="/content/job/{{ item.job_uid }}/thumbnail/image" alt="{{ item.title }} 대표 썸네일"
+         style="width:100%;aspect-ratio:9/16;object-fit:cover;border-radius:10px;margin-bottom:10px">
+    {% else %}
     <div style="aspect-ratio:9/16;border-radius:10px;background:linear-gradient(160deg,#1b2740,#0e1526);margin-bottom:10px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:12px">
       {% if item.bucket == 'completed' %}완성됨{% elif item.bucket == 'failed' %}실패{% else %}제작 중{% endif %}
     </div>
+    {% endif %}
     <b>{{ item.title }}</b>
     <div style="color:var(--muted);font-size:12px;margin:6px 0">{{ item.company }} · {{ item.created_at }}</div>
     <span class="badge {{ 'ok' if item.bucket == 'completed' else ('warn' if item.bucket == 'failed' else 'muted') }}">{{ status_label(item.status) }}</span>

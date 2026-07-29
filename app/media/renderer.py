@@ -193,6 +193,21 @@ def build_final_audio(tts_master_path: Path, music_path: Path | None, total_dura
     return (ok, f"audio_mix_failed: {err}" if not ok else "")
 
 
+def extract_frame_at(video_path: Path, timestamp_seconds: float, out_path: Path,
+                      width: int = MP4_WIDTH, height: int = MP4_HEIGHT) -> tuple[bool, str]:
+    """완성된 MP4에서 지정 시각의 프레임 1장을 JPEG로 추출한다(썸네일 후보용)."""
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    args = [
+        "-ss", f"{max(timestamp_seconds, 0.0):.3f}", "-i", _to_posix_rel(video_path),
+        "-frames:v", "1", "-vf", f"scale={width}:{height}", "-q:v", "3",
+        _to_posix_rel(out_path),
+    ]
+    ok, err = _run_ffmpeg(args, timeout=30)
+    if not ok:
+        return False, f"thumbnail_extract_failed: {err}"
+    return True, ""
+
+
 def mux_final(video_path: Path, audio_path: Path, out_path: Path) -> tuple[bool, str]:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     args = [

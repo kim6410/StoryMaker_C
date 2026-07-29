@@ -1445,3 +1445,63 @@ def list_recent_mp4_with_meta(limit: int = 15) -> list[dict]:
             (limit,),
         ).fetchall()
         return [dict(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
+# 대표 썸네일 (archive_items를 media_type='thumbnail'로 재사용)
+# ---------------------------------------------------------------------------
+def get_primary_thumbnail_for_project(project_id: int) -> Optional[dict]:
+    with get_readonly_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT * FROM archive_items
+            WHERE project_id=? AND media_type='thumbnail' AND media_deleted_at IS NULL
+            ORDER BY created_at DESC LIMIT 1
+            """,
+            (project_id,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def save_primary_thumbnail(project_id: int, user_id: int, relative_path: str, file_size_bytes: int) -> list[str]:
+    """대표 썸네일을 저장한다. 기존 활성 항목이 있으면 같은 트랜잭션에서 소프트 삭제하고
+    새 항목 1개만 삽입해 항상 활성 항목이 최대 1개로 수렴하도록 보장한다(동시 요청·이중
+    클릭에도 안전 - get_connection()의 전역 쓰기 락이 이 블록 전체를 직렬화한다).
+    실제 파일 삭제는 호출부(서비스 계층)가 반환된 옛 경로 목록으로 트랜잭션 밖에서 수행한다."""
+    now = _now()
+    with get_connection() as conn:
+        existing = conn.execute(
+            """
+            SELECT id, relative_path FROM archive_items
+            WHERE project_id=? AND media_type='thumbnail' AND media_deleted_at IS NULL
+            """,
+            (project_id,),
+        ).fetchall()
+        old_paths = [r["relative_path"] for r in existing]
+        for r in existing:
+            conn.execute(
+                "UPDATE archive_items SET media_deleted_at=?, updated_at=? WHERE id=?",
+                (now, now, r["id"]),
+            )
+        conn.execute(
+            """
+            INSERT INTO archive_items
+                (project_id, user_id, media_type, relative_path, file_size_bytes, is_primary, created_at, updated_at)
+            VALUES (?, ?, 'thumbnail', ?, ?, 1, ?, ?)
+            """,
+            (project_id, user_id, relative_path, file_size_bytes, now, now),
+        )
+    return old_paths
+
+
+def count_active_thumbnails_for_project(project_id: int) -> int:
+    """검증용: 현재 활성(소프트 삭제되지 않은) 대표 썸네일 행 수."""
+    with get_readonly_connection() as conn:
+        row = conn.execute(
+            """
+            SELECT COUNT(*) FROM archive_items
+            WHERE project_id=? AND media_type='thumbnail' AND media_deleted_at IS NULL
+            """,
+            (project_id,),
+        ).fetchone()
+        return int(row[0])

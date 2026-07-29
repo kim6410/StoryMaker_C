@@ -26,6 +26,21 @@
     </span>
   </div>
 </div>
+
+<div class="card" style="margin-top:14px">
+  <h3 style="margin-top:0">대표 썸네일</h3>
+  {% if thumbnail %}
+  <img src="/content/job/{{ project.job_uid }}/thumbnail/image" alt="대표 썸네일"
+       style="width:160px;aspect-ratio:9/16;object-fit:cover;border-radius:10px;border:2px solid var(--accent-2)">
+  <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap">
+    <a class="btn ghost" href="/content/job/{{ project.job_uid }}/thumbnail/image" download>썸네일 다운로드</a>
+    <a class="btn ghost" href="/content/job/{{ project.job_uid }}/thumbnail">다른 썸네일로 바꾸기</a>
+  </div>
+  {% else %}
+  <p style="color:var(--muted);font-size:13px;margin:0 0 10px">아직 대표 썸네일을 선택하지 않았습니다.</p>
+  <a class="btn secondary" style="width:auto;padding:0 18px" href="/content/job/{{ project.job_uid }}/thumbnail">대표 썸네일 선택하기</a>
+  {% endif %}
+</div>
 {% endif %}
 
 {% if master and master.status == 'success' %}
