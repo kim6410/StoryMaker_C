@@ -12,9 +12,15 @@
     <div class="topbar-left">
       <button class="hamburger" data-hamburger aria-label="메뉴 열기">≡</button>
       {% if active.startswith('admin') %}
-      <a class="brand" href="/admin">StoryMaker <span style="color:var(--accent)">관리자 센터</span></a>
+      <a class="brand brand-premium" href="/admin" aria-label="StoryMaker 관리자 센터">
+        <span class="brand-mark" aria-hidden="true">S</span>
+        <span class="brand-copy"><strong>StoryMaker</strong><small>ADMIN CENTER</small></span>
+      </a>
       {% else %}
-      <a class="brand" href="/dashboard">StoryMaker</a>
+      <a class="brand brand-premium" href="/dashboard" aria-label="StoryMaker 대시보드">
+        <span class="brand-mark" aria-hidden="true">S</span>
+        <span class="brand-copy"><strong>StoryMaker</strong><small>CONTENT STUDIO</small></span>
+      </a>
       {% endif %}
     </div>
     <div class="topbar-right">
@@ -30,7 +36,6 @@
 
   {% import "_icons.html" as icons %}
   <nav class="sidebar" data-sidebar>
-    <div class="nav-group-title">메뉴</div>
     {% for item in user_menu %}
     <a class="nav-item {{ 'active' if active == item.key else '' }}" href="{{ item.href }}">
       <span class="nav-icon">{{ icons.nav_icon(item.icon) }}</span>{{ item.label }}
