@@ -6,39 +6,51 @@
   <p>작업 번호: {{ project.job_uid }} · 채널마다 직접 수정, 원복, 재생성할 수 있습니다.</p>
 </div>
 
+{% include "_step_indicator.html" %}
+
 {% if channel_error_message %}
-<div class="card" style="border-color:var(--warn);margin-bottom:14px">
-  <p style="color:var(--warn);font-size:12px;margin:0">{{ channel_error_message }}</p>
+<div class="card" style="border-color:var(--danger);margin-bottom:14px">
+  <p style="color:var(--danger);font-size:12px;margin:0;font-weight:800">채널 재생성에 실패했습니다</p>
+  <p style="color:var(--muted);font-size:12px;margin:4px 0 0">{{ channel_error_message }}</p>
+  <p style="color:var(--muted);font-size:11px;margin:6px 0 0">다른 채널의 결과는 영향받지 않고 그대로 남아 있습니다.</p>
 </div>
 {% endif %}
 
-<div class="grid cols-2">
-  {% for ch in channels %}
-  <div class="card">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
-      <b>{{ ch.label }}</b>
-      <span class="badge {{ 'ok' if ch.row and ch.row.status == 'ready' else 'warn' }}">
-        {% if not ch.row %}미생성{% elif ch.row.is_edited %}수정됨{% else %}완료{% endif %}
-      </span>
-    </div>
+<div class="card">
+  <div class="tabs" data-tabs>
+    {% for ch in channels %}
+    <button type="button" class="tab {{ 'active' if loop.first else '' }}" data-tab="{{ ch.code }}">
+      {{ ch.label }}
+      {% if not ch.row %}<span class="badge muted" style="margin-left:6px">미생성</span>
+      {% elif ch.row.is_edited %}<span class="badge warn" style="margin-left:6px">수정됨</span>
+      {% else %}<span class="badge ok" style="margin-left:6px">완료</span>{% endif %}
+    </button>
+    {% endfor %}
+  </div>
 
+  {% for ch in channels %}
+  <div data-tab-panel="{{ ch.code }}" style="{{ '' if loop.first else 'display:none' }}">
     {% if ch.row %}
-    <form method="post" action="/content/job/{{ project.job_uid }}/channels/{{ ch.code }}/edit" style="margin-bottom:8px">
+    <form method="post" action="/content/job/{{ project.job_uid }}/channels/{{ ch.code }}/edit" data-async-submit
+          data-progress-messages="저장하고 있습니다">
       <label style="font-size:11px;color:var(--muted)">제목</label>
       <input type="text" name="title" value="{{ ch.row.title }}" style="width:100%;margin-bottom:6px">
-      <label style="font-size:11px;color:var(--muted)">본문</label>
-      <textarea name="body" rows="4" style="width:100%;margin-bottom:6px">{{ ch.row.body }}</textarea>
-      <label style="font-size:11px;color:var(--muted)">CTA</label>
+      <label style="font-size:11px;color:var(--muted)">
+        본문 <span id="len-{{ ch.code }}" style="color:var(--muted);font-weight:400">({{ ch.row.body|length }}자)</span>
+      </label>
+      <textarea name="body" rows="6" style="width:100%;margin-bottom:6px"
+                oninput="document.getElementById('len-{{ ch.code }}').textContent = '(' + this.value.length + '자)'">{{ ch.row.body }}</textarea>
+      <label style="font-size:11px;color:var(--muted)">CTA(행동 유도 문구)</label>
       <input type="text" name="cta" value="{{ ch.row.cta }}" style="width:100%;margin-bottom:6px">
       <label style="font-size:11px;color:var(--muted)">해시태그(쉼표로 구분)</label>
       <input type="text" name="hashtags" value="{{ ch.hashtags|join(', ') }}" style="width:100%;margin-bottom:8px">
 
       {% if ch.code == 'shortform_script' and video_script %}
-      <div style="font-size:11px;color:var(--muted);margin-bottom:8px">
-        <b>내레이션 원고</b>
-        <p style="margin:4px 0">{{ video_script.voice_script }}</p>
-        <b>장면 문장 ({{ scene_sentences|length }}개)</b>
-        <ol style="margin:4px 0 0 18px;padding:0">
+      <div class="card" style="margin-bottom:8px">
+        <b style="font-size:12px">내레이션 원고</b>
+        <p style="margin:4px 0;color:var(--muted);font-size:13px">{{ video_script.voice_script }}</p>
+        <b style="font-size:12px">장면 문장 ({{ scene_sentences|length }}개)</b>
+        <ol style="margin:4px 0 0 18px;padding:0;color:var(--muted);font-size:13px">
           {% for s in scene_sentences %}<li>{{ s }}</li>{% endfor %}
         </ol>
       </div>
@@ -54,8 +66,10 @@
 {{ ch.row.cta }}
 {{ ch.hashtags|join(' ') }}</div>
 
-    <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <form method="post" action="/content/job/{{ project.job_uid }}/channels/{{ ch.code }}/regenerate">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+      <form method="post" action="/content/job/{{ project.job_uid }}/channels/{{ ch.code }}/regenerate"
+            onsubmit="return confirm('이 채널을 다시 생성하면 지금 내용(수정한 내용 포함)이 새 결과로 바뀝니다. 계속할까요?');"
+            data-async-submit data-progress-messages="이 채널만 다시 만들고 있습니다">
         <button class="btn secondary" type="submit" style="width:auto;padding:0 14px">이 채널만 재생성</button>
       </form>
       {% if ch.row.is_edited %}
@@ -66,7 +80,8 @@
     </div>
     {% else %}
     <p style="color:var(--muted);font-size:12px">아직 생성되지 않았습니다.</p>
-    <form method="post" action="/content/job/{{ project.job_uid }}/channels/{{ ch.code }}/regenerate">
+    <form method="post" action="/content/job/{{ project.job_uid }}/channels/{{ ch.code }}/regenerate"
+          data-async-submit data-progress-messages="이 채널을 만들고 있습니다">
       <button class="btn secondary" type="submit" style="width:auto;padding:0 14px">이 채널 생성</button>
     </form>
     {% endif %}

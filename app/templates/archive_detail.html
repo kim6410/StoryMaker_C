@@ -1,49 +1,98 @@
 {% extends "base.html" %}
-{% block title %}보관함 상세 - {{ app_name }}{% endblock %}
+{% block title %}{{ project.title }} - 보관함 - {{ app_name }}{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1>{{ detail.title }}</h1>
-  <p>{{ detail.company }} · {{ detail.created_at }}</p>
+  <h1>{{ project.title }}</h1>
+  <p>{{ snapshot.company_name }} · {{ project.created_at[:16].replace('T',' ') }} · <span class="badge {{ 'ok' if project.status == 'completed' else ('warn' if project.status == 'failed' else 'muted') }}">{{ status_label(project.status) }}</span></p>
 </div>
 
 <div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">
-  <button class="btn secondary" style="width:auto;padding:0 16px" data-toast-msg="ZIP으로 전체 다운로드합니다. (샘플)">전체 ZIP 다운로드</button>
-  <button class="btn secondary" style="width:auto;padding:0 16px" data-toast-msg="콘텐츠를 복사했습니다. (샘플)">콘텐츠 전체 복사</button>
+  {% if project.status != 'completed' %}
+  <a class="btn secondary" style="width:auto;padding:0 16px" href="/content/job/{{ project.job_uid }}">이어서 작업하기</a>
+  {% endif %}
   <button class="btn danger" style="width:auto;padding:0 16px" data-modal-open="#delete-modal">삭제</button>
 </div>
 
+{% if mp4 and mp4.status == 'success' %}
 <div class="card">
-  <h3 style="margin-top:0">제작 미디어</h3>
-  <table>
-    <tbody>
-      <tr><td>원본/워터마크 이미지</td><td>{{ detail.assets.images | join(', ') }}</td><td><a class="btn ghost" href="#">다운로드</a></td></tr>
-      <tr><td>음성</td><td>{{ detail.assets.audio }}</td><td><a class="btn ghost" href="#">다운로드</a></td></tr>
-      <tr><td>자막</td><td>{{ detail.assets.subtitle }}</td><td><a class="btn ghost" href="#">다운로드</a></td></tr>
-      <tr><td>MP4</td><td>{{ detail.assets.video }}</td><td><a class="btn ghost" href="#">다운로드</a></td></tr>
-      <tr><td>대표 썸네일</td><td>{{ detail.assets.thumbnail }}</td><td><a class="btn ghost" href="#">다운로드</a></td></tr>
-    </tbody>
-  </table>
+  <h3 style="margin-top:0">완성 영상</h3>
+  <video controls preload="metadata" style="width:100%;max-width:360px;border-radius:8px;background:#000"
+         src="/content/job/{{ project.job_uid }}/mp4/video"></video>
+  <div style="display:flex;gap:10px;margin-top:10px;flex-wrap:wrap">
+    <a class="btn ghost" href="/content/job/{{ project.job_uid }}/mp4/video" download>MP4 다운로드</a>
+    <span style="color:var(--muted);font-size:12px;align-self:center">
+      {{ mp4.width }}×{{ mp4.height }} · {{ '%.1f'|format(mp4.duration_seconds) }}초 · {{ (mp4.file_size_bytes/1024/1024)|round(1) }}MB
+      · {{ '내 PC 제작' if mp4.render_method == 'local' else '서버 제작' }}
+    </span>
+  </div>
 </div>
+{% endif %}
+
+{% if master and master.status == 'success' %}
+<div class="card" style="margin-top:14px">
+  <h3 style="margin-top:0">음성·자막</h3>
+  <audio controls preload="metadata" style="width:100%" src="/content/job/{{ project.job_uid }}/tts/audio/full.wav"></audio>
+  {% if srt and srt.status == 'success' %}
+  <a class="btn ghost" style="margin-top:8px" href="/content/job/{{ project.job_uid }}/subtitle/download">SRT 다운로드</a>
+  {% endif %}
+</div>
+{% endif %}
+
+{% if music_mix and music_mix.source_relative_path %}
+<div class="card" style="margin-top:14px">
+  <h3 style="margin-top:0">배경음악</h3>
+  <p style="color:var(--muted);font-size:13px;margin:0">{{ music_mix.source_relative_path.split('/')[-1] }}</p>
+</div>
+{% endif %}
 
 <div class="card" style="margin-top:14px">
   <h3 style="margin-top:0">SNS 8채널 콘텐츠</h3>
   <div class="grid cols-2">
-    {% for ch in detail.channels %}
-    <div>
-      <b style="font-size:13px">{{ ch.name }}</b>
-      <div style="color:var(--muted);font-size:12px;margin:4px 0">{{ ch.title }}</div>
+    {% for ch in channels %}
+    <div class="card" style="background:var(--panel-2)">
+      <div style="display:flex;justify-content:space-between;align-items:center">
+        <b style="font-size:13px">{{ ch.label }}</b>
+        {% if ch.row %}<button class="btn ghost" type="button" data-copy="#arc-chan-{{ ch.code }}">복사</button>{% endif %}
+      </div>
+      {% if ch.row %}
+      <div id="arc-chan-{{ ch.code }}" style="color:var(--muted);font-size:12px;margin-top:6px;white-space:pre-line">{{ ch.row.title }}
+{{ ch.row.body }}
+{{ ch.row.cta }}</div>
+      {% else %}
+      <p style="color:var(--muted);font-size:12px;margin-top:6px">생성되지 않음</p>
+      {% endif %}
     </div>
     {% endfor %}
   </div>
+  {% if project.status != 'completed' or channels %}
+  <a class="btn secondary" style="margin-top:14px;width:auto;padding:0 18px" href="/content/job/{{ project.job_uid }}/channels">채널 전체 관리로 이동</a>
+  {% endif %}
+</div>
+
+<div class="card" style="margin-top:14px">
+  <h3 style="margin-top:0">제작 정보</h3>
+  <table>
+    <tbody>
+      <tr><td>업체명</td><td>{{ snapshot.company_name }}</td></tr>
+      <tr><td>전화번호</td><td>{{ snapshot.phone_number }}</td></tr>
+      <tr><td>주제</td><td>{{ snapshot.topic }}</td></tr>
+      <tr><td>지역</td><td>{{ snapshot.region }}</td></tr>
+      <tr><td>작업 번호</td><td>{{ project.job_uid }}</td></tr>
+    </tbody>
+  </table>
 </div>
 
 <div class="modal-backdrop" id="delete-modal">
   <div class="modal">
     <h3>이 콘텐츠를 삭제할까요?</h3>
-    <p style="color:var(--muted);font-size:13px">미디어 파일만 정리되며, 제작 기록은 보관함 목록 통계를 위해 유지됩니다.</p>
+    <p style="color:var(--muted);font-size:13px">
+      SNS 8채널 결과, 음성, 자막, 영상, 작업 기록이 모두 영구히 삭제되며 복구할 수 없습니다.
+    </p>
     <div class="modal-actions">
       <button class="btn secondary" data-modal-close>취소</button>
-      <a class="btn danger" href="/archive" data-once>삭제 확정 (샘플)</a>
+      <form method="post" action="/archive/{{ project.job_uid }}/delete" style="flex:1;margin:0">
+        <button class="btn danger" type="submit" style="width:100%">영구 삭제</button>
+      </form>
     </div>
   </div>
 </div>

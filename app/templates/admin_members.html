@@ -3,13 +3,40 @@
 {% block content %}
 <div class="page-head">
   <h1>회원관리 <span class="badge admin">관리자 전용</span></h1>
-  <p>실제 회원 DB(users 테이블) 목록입니다. 이 화면과 API는 서버에서 관리자 권한을 다시 검사합니다. 플랜·사용량 열은 구독 기능 연결 후 표시됩니다.</p>
+  <p>실제 회원 DB(users 테이블) 목록입니다. 이 화면과 API는 서버에서 관리자 권한을 다시 검사합니다.</p>
 </div>
 
 <div class="card">
+  <form method="get" action="/admin/members" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+    <div class="field" style="flex:1;min-width:180px;margin:0">
+      <label>이메일 · 이름 검색</label>
+      <input type="text" name="q" value="{{ q }}" placeholder="이메일 또는 이름">
+    </div>
+    <div class="field" style="min-width:130px;margin:0">
+      <label>상태</label>
+      <select name="status">
+        <option value="" {{ 'selected' if not status_filter }}>전체</option>
+        <option value="active" {{ 'selected' if status_filter == 'active' }}>활성</option>
+        <option value="inactive" {{ 'selected' if status_filter == 'inactive' }}>비활성</option>
+      </select>
+    </div>
+    <div class="field" style="min-width:130px;margin:0">
+      <label>플랜</label>
+      <select name="plan">
+        <option value="" {{ 'selected' if not plan_filter }}>전체</option>
+        <option value="paid" {{ 'selected' if plan_filter == 'paid' }}>유료</option>
+        <option value="free" {{ 'selected' if plan_filter == 'free' }}>무료</option>
+      </select>
+    </div>
+    <button class="btn" type="submit" style="width:auto;padding:0 20px">검색</button>
+    {% if q or status_filter or plan_filter %}<a class="btn ghost" href="/admin/members">초기화</a>{% endif %}
+  </form>
+</div>
+
+<div class="card" style="margin-top:14px">
   <div class="table-wrap">
   <table>
-    <thead><tr><th>ID</th><th>이름</th><th>이메일</th><th>역할</th><th>이메일 인증</th><th>가입일</th><th>최근 로그인</th><th>상태</th></tr></thead>
+    <thead><tr><th>ID</th><th>이름</th><th>이메일</th><th>역할</th><th>이메일 인증</th><th>가입일</th><th>최근 로그인</th><th>상태</th><th></th></tr></thead>
     <tbody>
       {% for m in members %}
       <tr>
@@ -21,9 +48,10 @@
         <td>{{ m.created_at[:10] if m.created_at else '-' }}</td>
         <td>{{ (m.last_login_at[:16] if m.last_login_at else '-') }}</td>
         <td>{% if m.status == 'active' %}<span class="badge ok">활성</span>{% else %}<span class="badge muted">비활성</span>{% endif %}</td>
+        <td><a class="btn ghost" href="/admin/members/{{ m.id }}">상세</a></td>
       </tr>
       {% else %}
-      <tr><td colspan="8" style="text-align:center;color:var(--muted)">아직 가입한 회원이 없습니다.</td></tr>
+      <tr><td colspan="9" style="text-align:center;color:var(--muted)">검색 결과가 없습니다.</td></tr>
       {% endfor %}
     </tbody>
   </table>

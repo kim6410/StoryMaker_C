@@ -28,6 +28,16 @@ app.mount("/static", StaticFiles(directory=APP_ROOT / "static"), name="static")
 templates = Jinja2Templates(directory=APP_ROOT / "templates")
 app.include_router(auth_router)
 
+# 단계10A: projects.status를 화면 어디서나 같은 한글 문구로 보여주기 위한 공통 매핑.
+PROJECT_STATUS_LABELS = {
+    "draft": "정보 입력 중", "queued": "대기 중",
+    "prompting": "원고 준비 중", "generating": "AI 원고 생성 중", "validating": "결과 확인 중",
+    "content_ready": "SNS 8채널 완료", "tts_ready": "음성 생성 완료", "subtitle_ready": "자막 생성 완료",
+    "media_ready": "영상 소재 준비 완료", "rendering": "영상 제작 중",
+    "completed": "완료", "failed": "실패",
+}
+templates.env.globals["status_label"] = lambda s: PROJECT_STATUS_LABELS.get(s, s)
+
 
 @app.on_event("startup")
 def _startup_run_migrations() -> None:
@@ -44,13 +54,16 @@ def _startup_run_migrations() -> None:
 USER_MENU = [
     {"key": "dashboard", "label": "대시보드", "href": "/dashboard", "icon": "grid"},
     {"key": "content_new", "label": "새 콘텐츠 제작", "href": "/content/new", "icon": "plus"},
+    {"key": "in_progress", "label": "진행 중 작업", "href": "/archive?status=in_progress", "icon": "clock"},
     {"key": "archive", "label": "보관함", "href": "/archive", "icon": "folder"},
     {"key": "mypage", "label": "마이페이지", "href": "/mypage", "icon": "user"},
     {"key": "subscription", "label": "구독 및 사용량", "href": "/subscription", "icon": "chart"},
 ]
 ADMIN_MENU = [
+    {"key": "admin_dashboard", "label": "관리자 대시보드", "href": "/admin", "icon": "grid"},
     {"key": "admin_members", "label": "회원관리", "href": "/admin/members", "icon": "shield"},
-    {"key": "admin_requests", "label": "요청사항 관리", "href": "/admin/requests", "icon": "inbox"},
+    {"key": "admin_jobs", "label": "작업관리", "href": "/admin/jobs", "icon": "clock"},
+    {"key": "admin_storage", "label": "저장공간·감사로그", "href": "/admin/storage", "icon": "folder"},
 ]
 
 # 3단계에서는 콘텐츠 제작·보관함 화면을 아직 실제 DB와 연결하지 않으므로
@@ -88,13 +101,6 @@ SAMPLE_ARCHIVE_DETAIL = {
     }
 }
 
-SAMPLE_REQUESTS = [
-    {"id": 101, "title": "썸네일 템플릿 색상 추가 요청", "importance": "보통", "status": "검토", "created_at": "2026-07-26"},
-    {"id": 102, "title": "네이버 블로그 서식 복사가 안 돼요", "importance": "높음", "status": "진행", "created_at": "2026-07-27"},
-    {"id": 103, "title": "보관함 검색 속도 개선 요청", "importance": "낮음", "status": "접수", "created_at": "2026-07-28"},
-]
-
-
 def _ctx(request: Request, user: dict, *, active: str = "", **extra) -> dict:
     admin_menu = ADMIN_MENU if str(user.get("role")) == "admin" else []
     return {
@@ -117,6 +123,14 @@ def _require_login_or_redirect(request: Request):
     return user
 
 
+def _require_admin_or_none(request: Request):
+    """로그인했고 role=admin인 사용자만 반환한다. 아니면 None(호출부에서 리다이렉트)."""
+    user = _require_login_or_redirect(request)
+    if not user or str(user.get("role")) != "admin":
+        return None
+    return user
+
+
 # ---------------------------------------------------------------------------
 # 인증 전 화면
 # ---------------------------------------------------------------------------
@@ -124,7 +138,7 @@ def _require_login_or_redirect(request: Request):
 def root(request: Request):
     if get_optional_user(request):
         return RedirectResponse(url="/dashboard")
-    return RedirectResponse(url="/login")
+    return RedirectResponse(url="/login", status_code=303)
 
 
 @app.get("/login")
@@ -166,17 +180,60 @@ def forgot_password_page(request: Request, error: str = "", sent: int = 0, dev_l
 # ---------------------------------------------------------------------------
 @app.get("/dashboard")
 def dashboard_page(request: Request):
+    import json as _json
+    from datetime import datetime, timezone
+
     user = _require_login_or_redirect(request)
     if not user:
-        return RedirectResponse(url="/login")
-    return templates.TemplateResponse("dashboard.html", _ctx(request, user, active="dashboard", recent=SAMPLE_ARCHIVE_ITEMS[:3]))
+        return RedirectResponse(url="/login", status_code=303)
+
+    from app.db import repository as repo
+    recent_projects = repo.list_projects_for_user(user["id"], limit=5)
+    recent = []
+    for p in recent_projects:
+        snapshot = _json.loads(p.get("input_snapshot_json") or "{}")
+        recent.append({
+            "job_uid": p["job_uid"], "title": p["title"],
+            "company": snapshot.get("company_name", "-"),
+            "created_at": p["created_at"][:16].replace("T", " "),
+            "status": p["status"], "error_code": p.get("error_code", ""),
+        })
+
+    counts = repo.count_projects_by_status_for_user(user["id"])
+    month_start = datetime.now(timezone.utc).strftime("%Y-%m-01T00:00:00")
+    monthly_count = repo.count_projects_for_user_since(user["id"], month_start)
+
+    plan = repo.get_active_subscription(user["id"])
+    monthly_limit = plan["monthly_project_limit"] if plan else 20  # Free 플랜 기본값(참고용, 강제 차단 아님)
+
+    company = repo.get_default_company_for_user(user["id"])
+
+    latest_completed_mp4 = None
+    for p in recent_projects:
+        if p["status"] == "completed":
+            mp4 = repo.get_mp4_for_project(p["id"])
+            if mp4 and mp4["status"] == "success":
+                latest_completed_mp4 = {"job_uid": p["job_uid"], "title": p["title"]}
+                break
+
+    from app.content.steps import STEP_DEFS, build_step_states
+    for r, p in zip(recent, recent_projects):
+        states = build_step_states(p)
+        current = next((s for s in states if s["state"] in ("current", "failed")), states[-1])
+        r["step_label"] = current["label"]
+
+    return templates.TemplateResponse("dashboard.html", _ctx(
+        request, user, active="dashboard", recent=recent, counts=counts,
+        monthly_count=monthly_count, monthly_limit=monthly_limit, company=company,
+        latest_completed_mp4=latest_completed_mp4,
+    ))
 
 
 @app.get("/content/new")
 def content_new_page(request: Request, error: str = ""):
     user = _require_login_or_redirect(request)
     if not user:
-        return RedirectResponse(url="/login")
+        return RedirectResponse(url="/login", status_code=303)
     from app.db import repository as repo
     from app.content.music import list_music_files
     company = repo.get_default_company_for_user(user["id"])
@@ -206,7 +263,7 @@ def create_content_job(
     import json
     user = _require_login_or_redirect(request)
     if not user:
-        return RedirectResponse(url="/login")
+        return RedirectResponse(url="/login", status_code=303)
     if not topic.strip():
         return RedirectResponse(url="/content/new?error=제작+주제를+입력해+주세요.", status_code=303)
 
@@ -261,7 +318,7 @@ def content_job_status(request: Request, job_uid: str, gen_error: str = ""):
     import json
     user = _require_login_or_redirect(request)
     if not user:
-        return RedirectResponse(url="/login")
+        return RedirectResponse(url="/login", status_code=303)
     from app.db import repository as repo
     from app.constants import GEMINI_ERROR_CODES
     project = _get_owned_project_or_none(job_uid, user)
@@ -278,10 +335,11 @@ def content_job_status(request: Request, job_uid: str, gen_error: str = ""):
     if gen_error and gen_error in GEMINI_ERROR_CODES:
         from app.ai.service import USER_ERROR_MESSAGES
         gen_error_message = USER_ERROR_MESSAGES.get(gen_error, "")
+    from app.content.steps import build_step_states
     return templates.TemplateResponse("content_job_status.html", _ctx(
         request, user, active="content_new", project=project, snapshot=snapshot,
         gemini_configured=gemini_configured, result=result, last_generation=last_generation,
-        gen_error_message=gen_error_message,
+        gen_error_message=gen_error_message, steps=build_step_states(project),
     ))
 
 
@@ -290,7 +348,7 @@ def content_job_generate(request: Request, job_uid: str):
     """6B단계: 실제 Gemini API를 호출해 SNS 8채널 + 숏폼 영상원고를 생성한다."""
     user = _require_login_or_redirect(request)
     if not user:
-        return RedirectResponse(url="/login")
+        return RedirectResponse(url="/login", status_code=303)
     project = _get_owned_project_or_none(job_uid, user)
     if not project:
         return RedirectResponse(url="/content/new")
@@ -316,7 +374,7 @@ def content_job_channels_page(request: Request, job_uid: str, channel_error: str
     import json
     user = _require_login_or_redirect(request)
     if not user:
-        return RedirectResponse(url="/login")
+        return RedirectResponse(url="/login", status_code=303)
     project = _get_owned_project_or_none(job_uid, user)
     if not project:
         return RedirectResponse(url="/content/new")
@@ -342,10 +400,11 @@ def content_job_channels_page(request: Request, job_uid: str, channel_error: str
         from app.ai.service import USER_ERROR_MESSAGES
         channel_error_message = USER_ERROR_MESSAGES.get(channel_error, "")
 
+    from app.content.steps import build_step_states
     return templates.TemplateResponse("content_job_channels.html", _ctx(
         request, user, active="content_new", project=project, channels=channels,
         video_script=video_script, scene_sentences=scene_sentences,
-        channel_error_message=channel_error_message,
+        channel_error_message=channel_error_message, steps=build_step_states(project),
     ))
 
 
@@ -353,7 +412,7 @@ def content_job_channels_page(request: Request, job_uid: str, channel_error: str
 def content_job_channel_regenerate(request: Request, job_uid: str, channel_code: str):
     user = _require_login_or_redirect(request)
     if not user:
-        return RedirectResponse(url="/login")
+        return RedirectResponse(url="/login", status_code=303)
     project = _get_owned_project_or_none(job_uid, user)
     if not project:
         return RedirectResponse(url="/content/new")
@@ -385,7 +444,7 @@ def content_job_channel_edit(
     import json
     user = _require_login_or_redirect(request)
     if not user:
-        return RedirectResponse(url="/login")
+        return RedirectResponse(url="/login", status_code=303)
     project = _get_owned_project_or_none(job_uid, user)
     if not project:
         return RedirectResponse(url="/content/new")
@@ -408,7 +467,7 @@ def content_job_channel_edit(
 def content_job_channel_revert(request: Request, job_uid: str, channel_code: str):
     user = _require_login_or_redirect(request)
     if not user:
-        return RedirectResponse(url="/login")
+        return RedirectResponse(url="/login", status_code=303)
     project = _get_owned_project_or_none(job_uid, user)
     if not project:
         return RedirectResponse(url="/content/new")
@@ -424,7 +483,7 @@ def content_job_tts_generate(request: Request, job_uid: str):
     """단계7: 영상원고 문장을 정규화해 Supertonic으로 TTS를 생성하고, 성공하면 SRT까지 만든다."""
     user = _require_login_or_redirect(request)
     if not user:
-        return RedirectResponse(url="/login")
+        return RedirectResponse(url="/login", status_code=303)
     project = _get_owned_project_or_none(job_uid, user)
     if not project:
         return RedirectResponse(url="/content/new")
@@ -446,7 +505,7 @@ def content_job_tts_generate(request: Request, job_uid: str):
 def content_job_tts_sentence_regenerate(request: Request, job_uid: str, sentence_index: int):
     user = _require_login_or_redirect(request)
     if not user:
-        return RedirectResponse(url="/login")
+        return RedirectResponse(url="/login", status_code=303)
     project = _get_owned_project_or_none(job_uid, user)
     if not project:
         return RedirectResponse(url="/content/new")
@@ -465,7 +524,7 @@ def content_job_tts_sentence_regenerate(request: Request, job_uid: str, sentence
 def content_job_tts_page(request: Request, job_uid: str):
     user = _require_login_or_redirect(request)
     if not user:
-        return RedirectResponse(url="/login")
+        return RedirectResponse(url="/login", status_code=303)
     project = _get_owned_project_or_none(job_uid, user)
     if not project:
         return RedirectResponse(url="/content/new")
@@ -475,9 +534,18 @@ def content_job_tts_page(request: Request, job_uid: str):
     master = repo.get_tts_master_for_project(project["id"])
     srt = repo.get_srt_for_project(project["id"])
     video_script = repo.get_video_script_for_project(project["id"])
+    from app.content.steps import build_step_states
+    import json as _json
+    snapshot = _json.loads(project.get("input_snapshot_json") or "{}")
+    phone_number = snapshot.get("phone_number", "")
+    phone_tts_preview = ""
+    if phone_number:
+        from app.tts.normalizer import normalize_for_tts
+        phone_tts_preview = normalize_for_tts(phone_number)
     return templates.TemplateResponse("content_job_tts.html", _ctx(
         request, user, active="content_new", project=project, sentences=sentences,
-        master=master, srt=srt, has_script=bool(video_script),
+        master=master, srt=srt, has_script=bool(video_script), video_script=video_script,
+        steps=build_step_states(project), phone_number=phone_number, phone_tts_preview=phone_tts_preview,
     ))
 
 
@@ -487,7 +555,7 @@ def content_job_tts_audio(request: Request, job_uid: str, filename: str):
     from fastapi import HTTPException
     user = _require_login_or_redirect(request)
     if not user:
-        return RedirectResponse(url="/login")
+        return RedirectResponse(url="/login", status_code=303)
     project = _get_owned_project_or_none(job_uid, user)
     if not project:
         return RedirectResponse(url="/content/new")
@@ -507,7 +575,7 @@ def content_job_subtitle_download(request: Request, job_uid: str):
     from fastapi.responses import FileResponse
     user = _require_login_or_redirect(request)
     if not user:
-        return RedirectResponse(url="/login")
+        return RedirectResponse(url="/login", status_code=303)
     project = _get_owned_project_or_none(job_uid, user)
     if not project:
         return RedirectResponse(url="/content/new")
@@ -531,7 +599,7 @@ def content_job_mp4_generate(request: Request, job_uid: str):
     """단계8: 배경음악 혼합 + 장면 구성 + FFmpeg 렌더로 최종 MP4를 만든다."""
     user = _require_login_or_redirect(request)
     if not user:
-        return RedirectResponse(url="/login")
+        return RedirectResponse(url="/login", status_code=303)
     project = _get_owned_project_or_none(job_uid, user)
     if not project:
         return RedirectResponse(url="/content/new")
@@ -552,7 +620,7 @@ def content_job_mp4_generate(request: Request, job_uid: str):
 def content_job_mp4_page(request: Request, job_uid: str, mp4_error: str = ""):
     user = _require_login_or_redirect(request)
     if not user:
-        return RedirectResponse(url="/login")
+        return RedirectResponse(url="/login", status_code=303)
     project = _get_owned_project_or_none(job_uid, user)
     if not project:
         return RedirectResponse(url="/content/new")
@@ -570,9 +638,12 @@ def content_job_mp4_page(request: Request, job_uid: str, mp4_error: str = ""):
         from app.media.service import USER_MP4_ERROR_MESSAGES
         mp4_error_message = USER_MP4_ERROR_MESSAGES.get(mp4_error, "")
 
+    from app.content.steps import build_step_states
+    zoom_labels = {"zoom_in": "천천히 확대", "zoom_out": "천천히 축소", "static": "고정 화면"}
     return templates.TemplateResponse("content_job_mp4.html", _ctx(
         request, user, active="content_new", project=project, mp4=mp4, music_mix=music_mix,
         scenes=scenes, has_tts=has_tts, mp4_error_message=mp4_error_message,
+        steps=build_step_states(project), zoom_labels=zoom_labels,
     ))
 
 
@@ -581,7 +652,7 @@ def content_job_mp4_video(request: Request, job_uid: str):
     from fastapi import HTTPException
     user = _require_login_or_redirect(request)
     if not user:
-        return RedirectResponse(url="/login")
+        return RedirectResponse(url="/login", status_code=303)
     project = _get_owned_project_or_none(job_uid, user)
     if not project:
         return RedirectResponse(url="/content/new")
@@ -608,7 +679,7 @@ def content_job_render_manifest(request: Request, job_uid: str):
     from fastapi.responses import JSONResponse
     user = _require_login_or_redirect(request)
     if not user:
-        return RedirectResponse(url="/login")
+        return RedirectResponse(url="/login", status_code=303)
     project = _get_owned_project_or_none(job_uid, user)
     if not project:
         return RedirectResponse(url="/content/new")
@@ -625,7 +696,7 @@ async def content_job_mp4_upload_local(request: Request, job_uid: str, file: Upl
     """단계9: 브라우저(WebGPU/WASM/WebCodecs)가 만든 MP4를 업로드받아 서버가 재검증 후 저장한다."""
     user = _require_login_or_redirect(request)
     if not user:
-        return RedirectResponse(url="/login")
+        return RedirectResponse(url="/login", status_code=303)
     project = _get_owned_project_or_none(job_uid, user)
     if not project:
         return RedirectResponse(url="/content/new")
@@ -665,7 +736,7 @@ async def content_job_mp4_render_diagnostics(request: Request, job_uid: str):
     """단계9: 로컬 가속 진단 정보(관리자 분석용)만 저장한다. 개인정보·과도한 장치 지문은 남기지 않는다."""
     user = _require_login_or_redirect(request)
     if not user:
-        return RedirectResponse(url="/login")
+        return RedirectResponse(url="/login", status_code=303)
     project = _get_owned_project_or_none(job_uid, user)
     if not project:
         return RedirectResponse(url="/content/new")
@@ -689,7 +760,7 @@ async def content_job_mp4_render_diagnostics(request: Request, job_uid: str):
 def content_channels_page(request: Request):
     user = _require_login_or_redirect(request)
     if not user:
-        return RedirectResponse(url="/login")
+        return RedirectResponse(url="/login", status_code=303)
     return templates.TemplateResponse("content_channels.html", _ctx(request, user, active="content_new", channels=SAMPLE_CHANNELS))
 
 
@@ -697,7 +768,7 @@ def content_channels_page(request: Request):
 def content_media_page(request: Request):
     user = _require_login_or_redirect(request)
     if not user:
-        return RedirectResponse(url="/login")
+        return RedirectResponse(url="/login", status_code=303)
     return templates.TemplateResponse("content_media.html", _ctx(request, user, active="content_new"))
 
 
@@ -705,32 +776,113 @@ def content_media_page(request: Request):
 def content_thumbnail_page(request: Request):
     user = _require_login_or_redirect(request)
     if not user:
-        return RedirectResponse(url="/login")
+        return RedirectResponse(url="/login", status_code=303)
     return templates.TemplateResponse("content_thumbnail.html", _ctx(request, user, active="content_new", candidates=list(range(1, 9))))
 
 
 @app.get("/archive")
-def archive_list_page(request: Request):
+def archive_list_page(request: Request, status: str = "all"):
+    import json as _json
     user = _require_login_or_redirect(request)
     if not user:
-        return RedirectResponse(url="/login")
-    return templates.TemplateResponse("archive_list.html", _ctx(request, user, active="archive", items=SAMPLE_ARCHIVE_ITEMS))
+        return RedirectResponse(url="/login", status_code=303)
+
+    from app.db import repository as repo
+    all_projects = repo.list_projects_for_user(user["id"], limit=200)
+
+    def _bucket(p_status: str) -> str:
+        if p_status == "completed":
+            return "completed"
+        if p_status == "failed":
+            return "failed"
+        return "in_progress"
+
+    items = []
+    for p in all_projects:
+        bucket = _bucket(p["status"])
+        if status != "all" and status != bucket:
+            continue
+        snapshot = _json.loads(p.get("input_snapshot_json") or "{}")
+        mp4 = repo.get_mp4_for_project(p["id"]) if bucket == "completed" else None
+        items.append({
+            "job_uid": p["job_uid"], "title": p["title"],
+            "company": snapshot.get("company_name", "-"),
+            "created_at": p["created_at"][:16].replace("T", " "),
+            "status": p["status"], "bucket": bucket,
+            "duration": f"{mp4['duration_seconds']:.0f}초" if mp4 and mp4["status"] == "success" else "-",
+            "size_mb": round(mp4["file_size_bytes"] / 1024 / 1024, 1) if mp4 and mp4["status"] == "success" else None,
+        })
+
+    return templates.TemplateResponse("archive_list.html", _ctx(
+        request, user, active="archive", items=items, status_filter=status,
+    ))
 
 
-@app.get("/archive/{item_id}")
-def archive_detail_page(request: Request, item_id: str):
+@app.get("/archive/{job_uid}")
+def archive_detail_page(request: Request, job_uid: str):
+    import json as _json
     user = _require_login_or_redirect(request)
     if not user:
-        return RedirectResponse(url="/login")
-    detail = SAMPLE_ARCHIVE_DETAIL.get(item_id, SAMPLE_ARCHIVE_DETAIL["job-sample-0001"])
-    return templates.TemplateResponse("archive_detail.html", _ctx(request, user, active="archive", item_id=item_id, detail=detail))
+        return RedirectResponse(url="/login", status_code=303)
+    project = _get_owned_project_or_none(job_uid, user)
+    if not project:
+        return RedirectResponse(url="/archive")
+
+    from app.db import repository as repo
+    from app.constants import CHANNEL_CODES, CHANNEL_LABELS
+
+    snapshot = _json.loads(project.get("input_snapshot_json") or "{}")
+    rows_by_code = {r["channel_code"]: r for r in repo.list_channel_results_for_project(project["id"])}
+    channels = [
+        {"code": c, "label": CHANNEL_LABELS[c], "row": rows_by_code.get(c)}
+        for c in CHANNEL_CODES
+    ]
+    master = repo.get_tts_master_for_project(project["id"])
+    srt = repo.get_srt_for_project(project["id"])
+    mp4 = repo.get_mp4_for_project(project["id"])
+    music_mix = repo.get_music_mix_for_project(project["id"])
+
+    return templates.TemplateResponse("archive_detail.html", _ctx(
+        request, user, active="archive", project=project, snapshot=snapshot, channels=channels,
+        master=master, srt=srt, mp4=mp4, music_mix=music_mix,
+    ))
+
+
+@app.post("/archive/{job_uid}/delete")
+def archive_delete(request: Request, job_uid: str):
+    """프로젝트와 연결된 모든 결과(채널·TTS·SRT·MP4 등)를 완전히 삭제한다(복구 불가).
+    DB는 FK CASCADE로 한 번에 정리되고, 실제 산출물 폴더도 함께 지운다."""
+    user = _require_login_or_redirect(request)
+    if not user:
+        return RedirectResponse(url="/login", status_code=303)
+    project = _get_owned_project_or_none(job_uid, user)
+    if not project:
+        return RedirectResponse(url="/archive")
+
+    from app.db import repository as repo
+    from app.config import JOBS_DIR
+    import shutil
+
+    repo.write_audit_log(user["id"], "project_deleted", target_type="project", target_id=project["id"])
+    repo.delete_project(project["id"])
+    job_dir = JOBS_DIR / job_uid
+    if job_dir.is_dir():
+        import time
+        # Windows에서는 방금까지 재생/다운로드하던 영상 파일의 핸들이 즉시 풀리지
+        # 않는 경우가 있어(파일 잠금), 짧은 재시도로 정리한다.
+        for _attempt in range(5):
+            shutil.rmtree(job_dir, ignore_errors=True)
+            if not job_dir.is_dir():
+                break
+            time.sleep(0.5)
+    return RedirectResponse(url="/archive", status_code=303)
 
 
 @app.get("/mypage")
 def mypage_page(request: Request, error: str = "", saved: int = 0, tab: str = "profile"):
     user = _require_login_or_redirect(request)
     if not user:
-        return RedirectResponse(url="/login")
+        return RedirectResponse(url="/login", status_code=303)
     from app.db import repository as repo
     company = repo.get_default_company_for_user(user["id"])
     return templates.TemplateResponse("mypage.html", _ctx(
@@ -757,7 +909,7 @@ def save_company(
 ):
     user = _require_login_or_redirect(request)
     if not user:
-        return RedirectResponse(url="/login")
+        return RedirectResponse(url="/login", status_code=303)
     if not company_name.strip():
         return RedirectResponse(url="/mypage?error=업체명은+필수입니다.", status_code=303)
     from app.db import repository as repo
@@ -783,30 +935,217 @@ def save_company(
 def subscription_page(request: Request):
     user = _require_login_or_redirect(request)
     if not user:
-        return RedirectResponse(url="/login")
+        return RedirectResponse(url="/login", status_code=303)
     return templates.TemplateResponse("subscription.html", _ctx(request, user, active="subscription"))
 
 
-@app.get("/admin/members")
-def admin_members_page(request: Request):
-    user = _require_login_or_redirect(request)
+def _dir_size_bytes(path: Path) -> int:
+    """폴더 전체 실제 사용량(바이트). 존재하지 않으면 0. 심볼릭 링크는 크기에 포함하지 않는다."""
+    if not path.is_dir():
+        return 0
+    total = 0
+    for dirpath, _dirnames, filenames in os.walk(path):
+        for name in filenames:
+            fp = Path(dirpath) / name
+            if fp.is_symlink():
+                continue
+            try:
+                total += fp.stat().st_size
+            except OSError:
+                pass
+    return total
+
+
+@app.get("/admin")
+def admin_dashboard_page(request: Request):
+    user = _require_admin_or_none(request)
     if not user:
-        return RedirectResponse(url="/login")
-    if str(user.get("role")) != "admin":
         return RedirectResponse(url="/dashboard")
     from app.db import repository as repo
-    members = repo.list_users(limit=200)
-    return templates.TemplateResponse("admin_members.html", _ctx(request, user, active="admin_members", members=members))
+    from app.config import DATA_DIR, JOBS_DIR, LOGS_DIR
+    import app.config as _cfg
+
+    today_start = datetime.now(timezone.utc).strftime("%Y-%m-%dT00:00:00")
+    month_start = datetime.now(timezone.utc).strftime("%Y-%m-01T00:00:00")
+
+    total_users = repo.count_users_total()
+    paid_users = repo.count_users_paid()
+    job_counts = repo.count_projects_by_status_global()
+    mp4_stats = repo.count_mp4_by_render_method()
+    storage_bytes = _dir_size_bytes(DATA_DIR) + _dir_size_bytes(LOGS_DIR)
+
+    recent_errors = []
+    for p in repo.list_recent_failed_projects(5):
+        recent_errors.append({
+            "job_uid": p["job_uid"], "title": p["title"], "user_email": p["user_email"],
+            "error_code": p.get("error_code", ""), "updated_at": p["updated_at"][:16].replace("T", " "),
+        })
+
+    return templates.TemplateResponse("admin_dashboard.html", _ctx(
+        request, user, active="admin_dashboard",
+        stats={
+            "total_users": total_users,
+            "active_users": repo.count_users_active(),
+            "paid_users": paid_users,
+            "free_users": max(total_users - paid_users, 0),
+            "today_signups": repo.count_users_created_since(today_start),
+            "month_signups": repo.count_users_created_since(month_start),
+            "today_jobs": repo.count_projects_created_since(today_start),
+            "month_jobs": repo.count_projects_created_since(month_start),
+            "job_counts": job_counts,
+            "ai_calls": repo.count_content_generation_calls(),
+            "tts_success": repo.count_tts_master_success(),
+            "mp4_local": mp4_stats["local"], "mp4_server": mp4_stats["server"], "mp4_fallback": mp4_stats["fallback"],
+            "storage_mb": round(storage_bytes / 1024 / 1024, 1),
+            "gemini_configured": bool(_cfg.GEMINI_API_KEY),
+        },
+        recent_errors=recent_errors,
+    ))
 
 
-@app.get("/admin/requests")
-def admin_requests_page(request: Request):
-    user = _require_login_or_redirect(request)
+@app.get("/admin/members")
+def admin_members_page(request: Request, q: str = "", status: str = "", plan: str = ""):
+    user = _require_admin_or_none(request)
     if not user:
-        return RedirectResponse(url="/login")
-    if str(user.get("role")) != "admin":
         return RedirectResponse(url="/dashboard")
-    return templates.TemplateResponse("admin_requests.html", _ctx(request, user, active="admin_requests", requests=SAMPLE_REQUESTS))
+    from app.db import repository as repo
+    members = repo.search_users(q=q.strip(), status=status, plan=plan, limit=200)
+    return templates.TemplateResponse("admin_members.html", _ctx(
+        request, user, active="admin_members", members=members, q=q, status_filter=status, plan_filter=plan,
+    ))
+
+
+@app.get("/admin/members/{member_id}")
+def admin_member_detail_page(request: Request, member_id: int, saved: int = 0):
+    user = _require_admin_or_none(request)
+    if not user:
+        return RedirectResponse(url="/dashboard")
+    from app.db import repository as repo
+    detail = repo.get_user_admin_detail(member_id)
+    if not detail:
+        return RedirectResponse(url="/admin/members")
+    plans = repo.list_plans()
+    return templates.TemplateResponse("admin_member_detail.html", _ctx(
+        request, user, active="admin_members", detail=detail, plans=plans, saved=saved,
+    ))
+
+
+@app.post("/admin/members/{member_id}/status")
+def admin_member_toggle_status(request: Request, member_id: int, new_status: str = Form(...)):
+    user = _require_admin_or_none(request)
+    if not user:
+        return RedirectResponse(url="/dashboard", status_code=303)
+    if new_status not in ("active", "inactive"):
+        return RedirectResponse(url=f"/admin/members/{member_id}")
+    from app.db import repository as repo
+    target = repo.get_user_by_id(member_id)
+    if target:
+        repo.update_user_status(member_id, new_status)
+        repo.write_audit_log(
+            user["id"], "admin_member_status_changed", target_type="user", target_id=member_id,
+            metadata_json=f'{{"from":"{target.get("status")}","to":"{new_status}"}}',
+        )
+    return RedirectResponse(url=f"/admin/members/{member_id}?saved=1", status_code=303)
+
+
+@app.post("/admin/members/{member_id}/notes")
+def admin_member_save_notes(request: Request, member_id: int, admin_notes: str = Form("")):
+    user = _require_admin_or_none(request)
+    if not user:
+        return RedirectResponse(url="/dashboard", status_code=303)
+    from app.db import repository as repo
+    if repo.get_user_by_id(member_id):
+        repo.update_user_admin_notes(member_id, admin_notes.strip()[:2000])
+        repo.write_audit_log(user["id"], "admin_member_note_saved", target_type="user", target_id=member_id)
+    return RedirectResponse(url=f"/admin/members/{member_id}?saved=1", status_code=303)
+
+
+@app.post("/admin/members/{member_id}/usage")
+def admin_member_set_usage(request: Request, member_id: int, usage_limit_override: str = Form("")):
+    user = _require_admin_or_none(request)
+    if not user:
+        return RedirectResponse(url="/dashboard", status_code=303)
+    from app.db import repository as repo
+    if repo.get_user_by_id(member_id):
+        value = int(usage_limit_override) if usage_limit_override.strip().isdigit() else None
+        repo.update_user_usage_override(member_id, value)
+        repo.write_audit_log(
+            user["id"], "admin_member_usage_adjusted", target_type="user", target_id=member_id,
+            metadata_json=f'{{"usage_limit_override":{value if value is not None else "null"}}}',
+        )
+    return RedirectResponse(url=f"/admin/members/{member_id}?saved=1", status_code=303)
+
+
+@app.post("/admin/members/{member_id}/plan")
+def admin_member_change_plan(request: Request, member_id: int, plan_id: int = Form(...)):
+    user = _require_admin_or_none(request)
+    if not user:
+        return RedirectResponse(url="/dashboard", status_code=303)
+    from app.db import repository as repo
+    if repo.get_user_by_id(member_id):
+        now = datetime.now(timezone.utc)
+        started = now.strftime("%Y-%m-%dT%H:%M:%S")
+        ends = now.replace(year=now.year + 1).strftime("%Y-%m-%dT%H:%M:%S")
+        repo.assign_subscription(member_id, plan_id, started, ends)
+        repo.write_audit_log(
+            user["id"], "admin_member_plan_changed", target_type="user", target_id=member_id,
+            metadata_json=f'{{"plan_id":{plan_id}}}',
+        )
+    return RedirectResponse(url=f"/admin/members/{member_id}?saved=1", status_code=303)
+
+
+@app.get("/admin/jobs")
+def admin_jobs_page(request: Request, q: str = "", status: str = "all"):
+    user = _require_admin_or_none(request)
+    if not user:
+        return RedirectResponse(url="/dashboard")
+    from app.db import repository as repo
+    rows = repo.list_all_projects_admin(q=q.strip(), status=status, limit=200)
+    jobs = [{
+        "job_uid": p["job_uid"], "title": p["title"], "user_email": p["user_email"],
+        "company_name": p.get("company_name") or "-", "status": p["status"],
+        "error_code": p.get("error_code", ""),
+        "created_at": p["created_at"][:16].replace("T", " "),
+        "updated_at": p["updated_at"][:16].replace("T", " "),
+    } for p in rows]
+    return templates.TemplateResponse("admin_jobs.html", _ctx(
+        request, user, active="admin_jobs", jobs=jobs, q=q, status_filter=status,
+    ))
+
+
+@app.get("/admin/storage")
+def admin_storage_page(request: Request, q: str = "", action: str = ""):
+    user = _require_admin_or_none(request)
+    if not user:
+        return RedirectResponse(url="/dashboard")
+    from app.db import repository as repo
+    from app.config import DATA_DIR, JOBS_DIR, MEDIA_DIR, LOGS_DIR, BACKUPS_DIR
+
+    def _mb(p: Path) -> float:
+        return round(_dir_size_bytes(p) / 1024 / 1024, 2)
+
+    folders = [
+        {"label": "DB", "path": "data/storymaker_claude.db",
+         "mb": round((DATA_DIR / "storymaker_claude.db").stat().st_size / 1024 / 1024, 2)
+         if (DATA_DIR / "storymaker_claude.db").is_file() else 0},
+        {"label": "작업 산출물(음성·SRT·MP4·썸네일)", "path": "data/jobs", "mb": _mb(JOBS_DIR)},
+        {"label": "미디어 임시", "path": "data/media", "mb": _mb(MEDIA_DIR)},
+        {"label": "로그", "path": "logs", "mb": _mb(LOGS_DIR)},
+        {"label": "백업", "path": "backups", "mb": _mb(BACKUPS_DIR)},
+    ]
+
+    logs = repo.search_audit_logs(q=q.strip(), action=action, limit=100)
+    audit_rows = [{
+        "created_at": r["created_at"][:19].replace("T", " "),
+        "user_email": r.get("user_email") or "-",
+        "action": r["action"], "target_type": r.get("target_type") or "-",
+        "target_id": r.get("target_id"),
+    } for r in logs]
+
+    return templates.TemplateResponse("admin_storage.html", _ctx(
+        request, user, active="admin_storage", folders=folders, audit_rows=audit_rows,
+        actions=repo.list_distinct_audit_actions(), q=q, action_filter=action,
+    ))
 
 
 @app.get("/content/music-preview/{filename}")
@@ -814,7 +1153,7 @@ def music_preview(request: Request, filename: str):
     """배경음악 미리듣기. runtime/music/mp3 원본을 그대로 스트리밍한다(복사 없음)."""
     user = _require_login_or_redirect(request)
     if not user:
-        return RedirectResponse(url="/login")
+        return RedirectResponse(url="/login", status_code=303)
     from app.content.music import resolve_music_path
     from app.media.range_response import range_file_response
     # 파일명만 받아 MUSIC_LIBRARY_DIR 안에서만 해석하므로 경로 이탈이 불가능하다.

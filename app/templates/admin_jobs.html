@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}관리자 - 작업관리 - {{ app_name }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>작업관리 <span class="badge admin">관리자 전용</span></h1>
+  <p>전체 사용자의 콘텐츠 제작 작업입니다. 상세로 이동하면 해당 작업의 실제 단계 화면에서 재시도·재생성할 수 있습니다.</p>
+</div>
+
+<div class="card">
+  <form method="get" action="/admin/jobs" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+    <div class="field" style="flex:1;min-width:220px;margin:0">
+      <label>검색 (작업번호 · 제목 · 사용자 이메일 · 업체명)</label>
+      <input type="text" name="q" value="{{ q }}" placeholder="예: proj_2026 또는 이메일 일부">
+    </div>
+    <div class="field" style="min-width:150px;margin:0">
+      <label>상태</label>
+      <select name="status">
+        <option value="all" {{ 'selected' if status_filter == 'all' }}>전체</option>
+        <option value="completed" {{ 'selected' if status_filter == 'completed' }}>완성</option>
+        <option value="failed" {{ 'selected' if status_filter == 'failed' }}>실패</option>
+      </select>
+    </div>
+    <button class="btn" type="submit" style="width:auto;padding:0 20px">검색</button>
+    {% if q or status_filter != 'all' %}<a class="btn ghost" href="/admin/jobs">초기화</a>{% endif %}
+  </form>
+</div>
+
+<div class="card" style="margin-top:14px">
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>작업번호</th><th>제목</th><th>사용자</th><th>업체</th><th>상태</th><th>생성</th><th>수정</th><th></th></tr></thead>
+    <tbody>
+      {% for j in jobs %}
+      <tr>
+        <td style="font-family:monospace;font-size:12px">{{ j.job_uid }}</td>
+        <td>{{ j.title }}</td>
+        <td>{{ j.user_email }}</td>
+        <td>{{ j.company_name }}</td>
+        <td>
+          <span class="badge {{ 'ok' if j.status == 'completed' else ('warn' if j.status == 'failed' else 'muted') }}">
+            {{ status_label(j.status) }}{% if j.status == 'failed' and j.error_code %} · {{ j.error_code }}{% endif %}
+          </span>
+        </td>
+        <td>{{ j.created_at }}</td>
+        <td>{{ j.updated_at }}</td>
+        <td><a class="btn ghost" href="/content/job/{{ j.job_uid }}">상세/재시도</a></td>
+      </tr>
+      {% else %}
+      <tr><td colspan="8" style="text-align:center;color:var(--muted)">검색 결과가 없습니다.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endblock %}

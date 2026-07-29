@@ -66,6 +66,94 @@ def delete_user(user_id: int) -> None:
         conn.execute("DELETE FROM users WHERE id=?", (user_id,))
 
 
+def search_users(q: str = "", status: str = "", plan: str = "", limit: int = 50, offset: int = 0) -> list[dict]:
+    """관리자 회원관리 검색. plan='paid'는 활성 구독이 있는 회원, 'free'는 없는 회원."""
+    where = ["1=1"]
+    params: list[Any] = []
+    if q:
+        where.append("(u.email LIKE ? OR u.display_name LIKE ?)")
+        like = f"%{q}%"
+        params += [like, like]
+    if status in ("active", "inactive"):
+        where.append("u.status=?")
+        params.append(status)
+    plan_join = ""
+    if plan == "paid":
+        plan_join = "JOIN user_subscriptions us ON us.user_id=u.id AND us.is_active=1"
+    elif plan == "free":
+        plan_join = "LEFT JOIN user_subscriptions us ON us.user_id=u.id AND us.is_active=1"
+        where.append("us.id IS NULL")
+    sql = f"""
+        SELECT u.* FROM users u {plan_join}
+        WHERE {' AND '.join(where)}
+        ORDER BY u.created_at DESC LIMIT ? OFFSET ?
+    """
+    params += [limit, offset]
+    with get_readonly_connection() as conn:
+        rows = conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
+
+def count_users_total() -> int:
+    with get_readonly_connection() as conn:
+        return int(conn.execute("SELECT COUNT(*) FROM users").fetchone()[0])
+
+
+def count_users_active() -> int:
+    with get_readonly_connection() as conn:
+        return int(conn.execute("SELECT COUNT(*) FROM users WHERE status='active'").fetchone()[0])
+
+
+def count_users_paid() -> int:
+    with get_readonly_connection() as conn:
+        row = conn.execute(
+            "SELECT COUNT(DISTINCT user_id) FROM user_subscriptions WHERE is_active=1"
+        ).fetchone()
+        return int(row[0])
+
+
+def count_users_created_since(since_iso: str) -> int:
+    with get_readonly_connection() as conn:
+        row = conn.execute("SELECT COUNT(*) FROM users WHERE created_at >= ?", (since_iso,)).fetchone()
+        return int(row[0])
+
+
+def update_user_admin_notes(user_id: int, notes: str) -> None:
+    with get_connection() as conn:
+        conn.execute("UPDATE users SET admin_notes=?, updated_at=? WHERE id=?", (notes, _now(), user_id))
+
+
+def update_user_usage_override(user_id: int, override: Optional[int]) -> None:
+    with get_connection() as conn:
+        conn.execute(
+            "UPDATE users SET usage_limit_override=?, updated_at=? WHERE id=?", (override, _now(), user_id)
+        )
+
+
+def get_user_admin_detail(user_id: int) -> Optional[dict]:
+    """관리자 회원 상세: 회원 기본정보 + 업체목록 + 프로젝트/보관함 집계 + 구독정보."""
+    user = get_user_by_id(user_id)
+    if not user:
+        return None
+    with get_readonly_connection() as conn:
+        companies = [dict(r) for r in conn.execute(
+            "SELECT * FROM companies WHERE user_id=? ORDER BY is_default DESC, created_at DESC", (user_id,)
+        ).fetchall()]
+        project_counts = conn.execute(
+            "SELECT status, COUNT(*) n FROM projects WHERE user_id=? GROUP BY status", (user_id,)
+        ).fetchall()
+    total_projects = sum(r["n"] for r in project_counts)
+    completed_projects = sum(r["n"] for r in project_counts if r["status"] == "completed")
+    subscription = get_active_subscription(user_id)
+    return {
+        "user": user,
+        "companies": companies,
+        "total_projects": total_projects,
+        "completed_projects": completed_projects,
+        "subscription": subscription,
+    }
+
+
 # ---------------------------------------------------------------------------
 # subscription_plans
 # ---------------------------------------------------------------------------
@@ -205,6 +293,92 @@ def update_project_status(project_id: int, status: str, error_code: str = "", pr
 def delete_project(project_id: int) -> None:
     with get_connection() as conn:
         conn.execute("DELETE FROM projects WHERE id=?", (project_id,))
+
+
+def count_projects_for_user_since(user_id: int, since_iso: str) -> int:
+    with get_readonly_connection() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM projects WHERE user_id=? AND created_at >= ?", (user_id, since_iso)
+        ).fetchone()
+        return int(row[0])
+
+
+def count_projects_by_status_for_user(user_id: int) -> dict:
+    """대시보드/보관함 카운트용: 진행중/실패/완료로 묶어서 센다."""
+    with get_readonly_connection() as conn:
+        rows = conn.execute(
+            "SELECT status, COUNT(*) as n FROM projects WHERE user_id=? GROUP BY status", (user_id,)
+        ).fetchall()
+    counts = {"in_progress": 0, "failed": 0, "completed": 0, "total": 0}
+    for r in rows:
+        counts["total"] += r["n"]
+        if r["status"] == "completed":
+            counts["completed"] += r["n"]
+        elif r["status"] == "failed":
+            counts["failed"] += r["n"]
+        else:
+            counts["in_progress"] += r["n"]
+    return counts
+
+
+def count_projects_created_since(since_iso: str) -> int:
+    with get_readonly_connection() as conn:
+        row = conn.execute("SELECT COUNT(*) FROM projects WHERE created_at >= ?", (since_iso,)).fetchone()
+        return int(row[0])
+
+
+def count_projects_by_status_global() -> dict:
+    with get_readonly_connection() as conn:
+        rows = conn.execute("SELECT status, COUNT(*) n FROM projects GROUP BY status").fetchall()
+    counts = {"in_progress": 0, "failed": 0, "completed": 0, "total": 0}
+    for r in rows:
+        counts["total"] += r["n"]
+        if r["status"] == "completed":
+            counts["completed"] += r["n"]
+        elif r["status"] == "failed":
+            counts["failed"] += r["n"]
+        else:
+            counts["in_progress"] += r["n"]
+    return counts
+
+
+def list_all_projects_admin(q: str = "", status: str = "", limit: int = 100, offset: int = 0) -> list[dict]:
+    """관리자 작업관리 목록: 사용자 이메일·업체명을 함께 반환한다."""
+    where = ["1=1"]
+    params: list[Any] = []
+    if status and status != "all":
+        where.append("p.status=?")
+        params.append(status)
+    if q:
+        where.append("(u.email LIKE ? OR p.title LIKE ? OR p.job_uid LIKE ? OR c.company_name LIKE ?)")
+        like = f"%{q}%"
+        params += [like, like, like, like]
+    sql = f"""
+        SELECT p.*, u.email AS user_email, c.company_name AS company_name
+        FROM projects p
+        JOIN users u ON u.id = p.user_id
+        LEFT JOIN companies c ON c.id = p.company_id
+        WHERE {' AND '.join(where)}
+        ORDER BY p.updated_at DESC LIMIT ? OFFSET ?
+    """
+    params += [limit, offset]
+    with get_readonly_connection() as conn:
+        rows = conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
+
+def list_recent_failed_projects(limit: int = 10) -> list[dict]:
+    with get_readonly_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT p.*, u.email AS user_email
+            FROM projects p JOIN users u ON u.id = p.user_id
+            WHERE p.status='failed'
+            ORDER BY p.updated_at DESC LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
 
 
 # ---------------------------------------------------------------------------
@@ -1072,3 +1246,76 @@ def save_render_diagnostics(project_id: int, user_id: int, fields: dict) -> int:
             ),
         )
         return int(cur.lastrowid)
+
+
+# ---------------------------------------------------------------------------
+# 관리자 대시보드/진단 집계
+# ---------------------------------------------------------------------------
+def count_content_generation_calls() -> int:
+    with get_readonly_connection() as conn:
+        return int(conn.execute("SELECT COUNT(*) FROM content_generations").fetchone()[0])
+
+
+def count_tts_master_success() -> int:
+    with get_readonly_connection() as conn:
+        row = conn.execute("SELECT COUNT(*) FROM content_tts_master WHERE status='success'").fetchone()
+        return int(row[0])
+
+
+def count_mp4_by_render_method() -> dict:
+    """로컬(webgpu/webcodecs)·서버 렌더 성공 건수와 폴백 발생 건수."""
+    with get_readonly_connection() as conn:
+        rows = conn.execute(
+            "SELECT render_method, COUNT(*) n FROM content_mp4 WHERE status='success' GROUP BY render_method"
+        ).fetchall()
+        fallback_n = conn.execute(
+            "SELECT COUNT(*) FROM content_mp4 WHERE fallback_reason != ''"
+        ).fetchone()[0]
+    result = {"local": 0, "server": 0, "fallback": int(fallback_n)}
+    for r in rows:
+        if r["render_method"] == "server":
+            result["server"] += r["n"]
+        else:
+            result["local"] += r["n"]
+    return result
+
+
+def list_render_diagnostics(limit: int = 50) -> list[dict]:
+    with get_readonly_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT d.*, u.email AS user_email
+            FROM content_render_diagnostics d JOIN users u ON u.id = d.user_id
+            ORDER BY d.created_at DESC LIMIT ?
+            """,
+            (limit,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def search_audit_logs(q: str = "", action: str = "", limit: int = 100, offset: int = 0) -> list[dict]:
+    where = ["1=1"]
+    params: list[Any] = []
+    if action:
+        where.append("a.action=?")
+        params.append(action)
+    if q:
+        where.append("(u.email LIKE ? OR a.target_type LIKE ?)")
+        like = f"%{q}%"
+        params += [like, like]
+    sql = f"""
+        SELECT a.*, u.email AS user_email
+        FROM audit_logs a LEFT JOIN users u ON u.id = a.user_id
+        WHERE {' AND '.join(where)}
+        ORDER BY a.created_at DESC LIMIT ? OFFSET ?
+    """
+    params += [limit, offset]
+    with get_readonly_connection() as conn:
+        rows = conn.execute(sql, params).fetchall()
+        return [dict(r) for r in rows]
+
+
+def list_distinct_audit_actions() -> list[str]:
+    with get_readonly_connection() as conn:
+        rows = conn.execute("SELECT DISTINCT action FROM audit_logs ORDER BY action").fetchall()
+        return [r["action"] for r in rows]

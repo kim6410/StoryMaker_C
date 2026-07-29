@@ -1,41 +1,46 @@
 {% extends "base.html" %}
-{% block title %}제작 작업 상태 - {{ app_name }}{% endblock %}
+{% block title %}{{ project.title }} - {{ app_name }}{% endblock %}
 {% block content %}
 <div class="page-head">
   <h1>{{ project.title }}</h1>
   <p>작업 번호: {{ project.job_uid }} · 생성일: {{ project.created_at[:16] }}</p>
 </div>
 
+{% include "_step_indicator.html" %}
+
 <div class="card">
   <h3 style="margin-top:0">현재 상태</h3>
-  <span class="badge {{ 'warn' if project.status in ['draft','queued'] else 'ok' }}">{{ project.status }}</span>
+  <span class="badge {{ 'ok' if project.status == 'completed' else ('warn' if project.status == 'failed' else 'muted') }}">{{ status_label(project.status) }}</span>
 
   {% if not gemini_configured %}
   <div class="card" style="border-color:var(--warn);margin-top:14px">
     <b style="color:var(--warn);font-size:12px">AI 콘텐츠 생성 대기 중</b>
     <p style="color:var(--muted);font-size:12px;margin:6px 0">
-      이 작업은 정상적으로 저장됐지만, Gemini API 키가 아직 설정되지 않아 콘텐츠 자동 생성 단계로 진행할 수 없습니다.
-      <code>config/.env</code>의 <code>GEMINI_API_KEY</code>를 채운 뒤 다시 시도해 주세요.
+      이 작업은 정상적으로 저장됐지만, 관리자가 AI 연동을 아직 설정하지 않아 콘텐츠 자동 생성 단계로 진행할 수 없습니다.
+      잠시 후 다시 시도하거나 관리자에게 문의해 주세요.
     </p>
   </div>
   {% else %}
   <div class="card" style="margin-top:14px">
-    <form method="post" action="/content/job/{{ project.job_uid }}/generate">
+    <form method="post" action="/content/job/{{ project.job_uid }}/generate" data-async-submit
+          data-progress-messages="업체 정보를 확인하고 있습니다,채널별 문체를 구성하고 있습니다,SNS 8채널 콘텐츠를 작성하고 있습니다,영상 원고를 정리하고 있습니다,결과를 저장하고 있습니다">
       <button class="btn" type="submit" style="width:auto;padding:0 20px">
         {% if project.status == 'content_ready' %}SNS 8채널 다시 생성하기{% else %}SNS 8채널 생성하기{% endif %}
       </button>
     </form>
 
     {% if gen_error_message %}
-    <p style="color:var(--warn);font-size:12px;margin:10px 0 0">{{ gen_error_message }}</p>
+    <div class="card" style="border-color:var(--danger);margin-top:12px">
+      <p style="color:var(--danger);font-size:12px;margin:0 0 4px;font-weight:800">생성에 실패했습니다</p>
+      <p style="color:var(--muted);font-size:12px;margin:0">{{ gen_error_message }}</p>
+      <p style="color:var(--muted);font-size:11px;margin:6px 0 0">이미 만들어진 결과가 있다면 그대로 남아 있습니다. 위 버튼으로 다시 시도할 수 있습니다.</p>
+    </div>
     {% endif %}
 
     {% if last_generation %}
     <p style="color:var(--muted);font-size:11px;margin:10px 0 0">
-      마지막 시도: {{ last_generation.status }}
-      {% if last_generation.error_code %}({{ last_generation.error_code }}){% endif %}
-      · provider={{ last_generation.provider }} model={{ last_generation.model }}
-      · latency={{ last_generation.latency_ms }}ms · retry={{ last_generation.retry_count }}
+      마지막 시도: {{ '성공' if last_generation.status == 'success' else ('진행 중' if last_generation.status == 'pending' else '실패') }}
+      · 소요 {{ last_generation.latency_ms }}ms
     </p>
     {% endif %}
 
@@ -48,7 +53,10 @@
 </div>
 
 <div class="card" style="margin-top:14px">
-  <h3 style="margin-top:0">제작 요청 스냅샷 (마이페이지 업체 정보와 별개로 이 작업에 고정됨)</h3>
+  <h3 style="margin-top:0">제작 요청 스냅샷</h3>
+  <p style="color:var(--muted);font-size:12px;margin:0 0 12px">
+    마이페이지 업체 정보를 나중에 바꾸더라도 이 작업의 결과는 아래 값으로 그대로 유지됩니다.
+  </p>
   <table>
     <tbody>
       <tr><td>업체명</td><td>{{ snapshot.company_name }}</td></tr>

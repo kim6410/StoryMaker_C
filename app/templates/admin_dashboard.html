@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}관리자 대시보드 - {{ app_name }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>관리자 대시보드 <span class="badge admin">관리자 전용</span></h1>
+  <p>실제 DB 기준 집계입니다. 카드를 누르면 관련 상세 목록으로 이동합니다.</p>
+</div>
+
+<div class="grid cols-4">
+  <a class="card stat" href="/admin/members" style="text-decoration:none">
+    <div class="num">{{ stats.total_users }}</div><div class="label">전체 회원</div>
+  </a>
+  <a class="card stat" href="/admin/members?status=active" style="text-decoration:none">
+    <div class="num" style="color:var(--ok)">{{ stats.active_users }}</div><div class="label">활성 회원</div>
+  </a>
+  <a class="card stat" href="/admin/members?plan=paid" style="text-decoration:none">
+    <div class="num">{{ stats.paid_users }} / {{ stats.free_users }}</div><div class="label">유료 / 무료 회원</div>
+  </a>
+  <div class="card stat">
+    <div class="num">{{ stats.today_signups }} / {{ stats.month_signups }}</div><div class="label">오늘 / 이번 달 신규가입</div>
+  </div>
+</div>
+
+<div class="grid cols-4" style="margin-top:14px">
+  <div class="card stat">
+    <div class="num">{{ stats.today_jobs }} / {{ stats.month_jobs }}</div><div class="label">오늘 / 이번 달 작업 수</div>
+  </div>
+  <a class="card stat" href="/admin/jobs?status=completed" style="text-decoration:none">
+    <div class="num" style="color:var(--ok)">{{ stats.job_counts.completed }}</div><div class="label">완료 작업</div>
+  </a>
+  <a class="card stat" href="/admin/jobs?status=in_progress" style="text-decoration:none">
+    <div class="num" style="color:var(--accent)">{{ stats.job_counts.in_progress }}</div><div class="label">진행 중 작업</div>
+  </a>
+  <a class="card stat" href="/admin/jobs?status=failed" style="text-decoration:none">
+    <div class="num" style="color:var(--danger)">{{ stats.job_counts.failed }}</div><div class="label">실패 작업</div>
+  </a>
+</div>
+
+<div class="grid cols-4" style="margin-top:14px">
+  <div class="card stat"><div class="num">{{ stats.ai_calls }}</div><div class="label">AI(Gemini) 호출 수</div></div>
+  <div class="card stat"><div class="num">{{ stats.tts_success }}</div><div class="label">TTS 생성 성공 수</div></div>
+  <div class="card stat"><div class="num">{{ stats.mp4_local }} / {{ stats.mp4_server }}</div><div class="label">로컬 / 서버 MP4 렌더</div></div>
+  <div class="card stat"><div class="num">{{ stats.mp4_fallback }}</div><div class="label">서버 자동 폴백 발생 수</div></div>
+</div>
+
+<div class="grid cols-2" style="margin-top:14px">
+  <a class="card stat" href="/admin/storage" style="text-decoration:none">
+    <div class="num">{{ stats.storage_mb }}MB</div><div class="label">저장공간 사용량(data+logs) · 상세 보기</div>
+  </a>
+  <div class="card stat">
+    <div class="num" style="color: {{ 'var(--ok)' if stats.gemini_configured else 'var(--danger)' }}">
+      {{ '설정됨' if stats.gemini_configured else '미설정' }}
+    </div>
+    <div class="label">Gemini Provider 상태</div>
+  </div>
+</div>
+
+<div class="card" style="margin-top:16px">
+  <h3 style="margin:0 0 10px">최근 실패 작업</h3>
+  {% if recent_errors %}
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>제목</th><th>사용자</th><th>오류코드</th><th>시각</th><th></th></tr></thead>
+    <tbody>
+      {% for e in recent_errors %}
+      <tr>
+        <td>{{ e.title }}</td>
+        <td>{{ e.user_email }}</td>
+        <td><span class="badge warn">{{ e.error_code or '미기록' }}</span></td>
+        <td>{{ e.updated_at }}</td>
+        <td><a class="btn ghost" href="/admin/jobs?q={{ e.job_uid }}">보기</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <div class="empty">최근 실패한 작업이 없습니다.</div>
+  {% endif %}
+</div>
+{% endblock %}

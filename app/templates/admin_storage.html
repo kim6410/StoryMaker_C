@@ -1,0 +1,61 @@
+{% extends "base.html" %}
+{% block title %}관리자 - 저장공간·감사로그 - {{ app_name }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>저장공간 · 감사로그 <span class="badge admin">관리자 전용</span></h1>
+  <p>실제 디스크 사용량과 관리자·시스템 활동 기록입니다. 삭제·정리 기능은 이번 단계에 포함하지 않습니다(예상 용량만 우선 제공).</p>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0">폴더별 사용량</h3>
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>구분</th><th>경로</th><th>용량</th></tr></thead>
+    <tbody>
+      {% for f in folders %}
+      <tr><td>{{ f.label }}</td><td style="font-family:monospace;font-size:12px">{{ f.path }}</td><td>{{ f.mb }}MB</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+
+<div class="card" style="margin-top:14px">
+  <h3 style="margin-top:0">감사로그</h3>
+  <form method="get" action="/admin/storage" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px">
+    <div class="field" style="flex:1;min-width:180px;margin:0">
+      <label>사용자 이메일 · 대상 검색</label>
+      <input type="text" name="q" value="{{ q }}">
+    </div>
+    <div class="field" style="min-width:200px;margin:0">
+      <label>동작 종류</label>
+      <select name="action">
+        <option value="" {{ 'selected' if not action_filter }}>전체</option>
+        {% for a in actions %}
+        <option value="{{ a }}" {{ 'selected' if action_filter == a }}>{{ a }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <button class="btn" type="submit" style="width:auto;padding:0 20px">검색</button>
+    {% if q or action_filter %}<a class="btn ghost" href="/admin/storage">초기화</a>{% endif %}
+  </form>
+
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>시각</th><th>사용자</th><th>동작</th><th>대상</th></tr></thead>
+    <tbody>
+      {% for r in audit_rows %}
+      <tr>
+        <td>{{ r.created_at }}</td>
+        <td>{{ r.user_email }}</td>
+        <td>{{ r.action }}</td>
+        <td>{{ r.target_type }}{% if r.target_id %} #{{ r.target_id }}{% endif %}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="4" style="text-align:center;color:var(--muted)">기록이 없습니다.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+</div>
+{% endblock %}

@@ -6,6 +6,8 @@
   <p>영상원고를 문장 단위로 실제 음성(TTS)으로 만들고, 실제 음성 길이에 맞춰 자막(SRT)을 만듭니다.</p>
 </div>
 
+{% include "_step_indicator.html" %}
+
 {% if not has_script %}
 <div class="card" style="border-color:var(--warn)">
   <p style="color:var(--warn);font-size:12px;margin:0">
@@ -15,31 +17,39 @@
 {% else %}
 
 <div class="card">
-  <form method="post" action="/content/job/{{ project.job_uid }}/tts/generate">
+  <form method="post" action="/content/job/{{ project.job_uid }}/tts/generate" data-async-submit
+        data-progress-messages="원고를 문장으로 나누고 있습니다,문장별 음성을 만들고 있습니다,자막 시간을 맞추고 있습니다,저장하고 있습니다">
     <button class="btn" type="submit" style="width:auto;padding:0 20px">
       {% if sentences %}TTS·SRT 다시 만들기{% else %}TTS·SRT 만들기{% endif %}
     </button>
   </form>
 
+  {% if phone_number %}
+  <p style="color:var(--muted);font-size:12px;margin:12px 0 0">
+    전화번호(화면 표시): <b style="color:var(--text)">{{ phone_number }}</b>
+    <br>TTS 읽기 미리보기: <span style="color:var(--accent)">{{ phone_tts_preview }}</span>
+  </p>
+  {% endif %}
+
   {% if master %}
   <p style="color:var(--muted);font-size:12px;margin:10px 0 0">
-    전체 음성 상태: <b>{{ master.status }}</b>
+    전체 음성 상태: <b class="{{ 'ok' if master.status == 'success' else '' }}" style="color:{{ 'var(--ok)' if master.status == 'success' else 'var(--text)' }}">{{ '완료' if master.status == 'success' else ('실패' if master.status == 'failed' else '대기') }}</b>
     {% if master.status == 'success' %}· 길이 {{ '%.2f'|format(master.total_duration_seconds) }}초{% endif %}
   </p>
   {% if master.status == 'success' %}
-  <audio controls style="width:100%;margin-top:8px" src="/content/job/{{ project.job_uid }}/tts/audio/full.wav"></audio>
+  <audio controls preload="metadata" style="width:100%;margin-top:8px" src="/content/job/{{ project.job_uid }}/tts/audio/full.wav"></audio>
+  <p style="color:var(--muted);font-size:11px;margin:4px 0 0">탐색(구간 이동)이 가능합니다.</p>
   {% endif %}
   {% endif %}
 
   {% if srt %}
   <p style="color:var(--muted);font-size:12px;margin:10px 0 0">
-    SRT 상태: <b>{{ srt.status }}</b>
+    자막(SRT) 상태: <b style="color:{{ 'var(--ok)' if srt.status == 'success' else 'var(--text)' }}">{{ '완료' if srt.status == 'success' else '실패' }}</b>
     {% if srt.status == 'success' %}
-    · {{ srt.cue_count }}개 자막 · 마지막 종료 {{ '%.2f'|format(srt.last_cue_end_seconds) }}초
-    · 오차 {{ '%.3f'|format(srt.drift_seconds) }}초
-    <a href="/content/job/{{ project.job_uid }}/subtitle/download">SRT 다운로드</a>
+    · {{ srt.cue_count }}개 자막 · 음성과 자막 오차 {{ '%.3f'|format(srt.drift_seconds) }}초
+    · <a href="/content/job/{{ project.job_uid }}/subtitle/download">SRT 다운로드</a>
     {% else %}
-    · {{ srt.error_code }}
+    · 자막을 만들지 못했습니다({{ srt.error_code }}). 실패한 문장을 먼저 재생성해 주세요.
     {% endif %}
   </p>
   {% endif %}
@@ -47,25 +57,40 @@
 
 {% if sentences %}
 <div class="card" style="margin-top:14px">
+  <h3 style="margin-top:0">문장별 타임라인</h3>
+  <div style="display:flex;height:28px;border-radius:8px;overflow:hidden;border:1px solid var(--border)">
+    {% for s in sentences %}
+    <div title="#{{ s.sentence_index + 1 }} · {{ '%.2f'|format(s.duration_seconds) }}초"
+         style="flex:{{ s.duration_seconds if s.duration_seconds > 0 else 0.3 }};
+                background:{{ 'rgba(74,222,128,.35)' if s.status == 'success' else 'rgba(255,107,107,.35)' }};
+                border-right:1px solid var(--bg);min-width:2px"></div>
+    {% endfor %}
+  </div>
+  <p style="color:var(--muted);font-size:11px;margin:6px 0 0">문장 길이에 비례한 타임라인입니다(초록: 완료, 빨강: 실패). 각 구간에 마우스를 올리면 번호와 길이가 보입니다.</p>
+</div>
+
+<div class="card" style="margin-top:14px">
   <h3 style="margin-top:0">문장별 음성 ({{ sentences|length }}개)</h3>
+  <div class="table-wrap">
   <table>
     <thead><tr><th>#</th><th>자막 텍스트</th><th>상태</th><th>길이</th><th>재생</th><th></th></tr></thead>
     <tbody>
       {% for s in sentences %}
       <tr>
         <td>{{ s.sentence_index + 1 }}</td>
-        <td style="max-width:320px">{{ s.original_text }}</td>
-        <td><span class="badge {{ 'ok' if s.status == 'success' else ('muted' if s.status == 'pending' else 'warn') }}">{{ s.status }}{% if s.error_code %} ({{ s.error_code }}){% endif %}</span></td>
+        <td style="max-width:320px;white-space:normal">{{ s.original_text }}</td>
+        <td><span class="badge {{ 'ok' if s.status == 'success' else ('muted' if s.status == 'pending' else 'warn') }}">{{ '완료' if s.status == 'success' else ('대기' if s.status == 'pending' else '실패') }}</span></td>
         <td>{% if s.status == 'success' %}{{ '%.2f'|format(s.duration_seconds) }}초{% else %}-{% endif %}</td>
         <td>
           {% if s.status == 'success' %}
-          <audio controls style="height:28px;max-width:180px" src="/content/job/{{ project.job_uid }}/tts/audio/sentence_{{ '%03d'|format(s.sentence_index) }}.wav"></audio>
+          <audio controls preload="metadata" style="height:28px;max-width:180px" src="/content/job/{{ project.job_uid }}/tts/audio/sentence_{{ '%03d'|format(s.sentence_index) }}.wav"></audio>
           {% endif %}
         </td>
         <td>
           {% if s.status != 'success' %}
-          <form method="post" action="/content/job/{{ project.job_uid }}/tts/sentence/{{ s.sentence_index }}/regenerate">
-            <button class="btn ghost" type="submit" style="width:auto;padding:0 10px">재생성</button>
+          <form method="post" action="/content/job/{{ project.job_uid }}/tts/sentence/{{ s.sentence_index }}/regenerate"
+                data-async-submit data-progress-messages="이 문장만 다시 만들고 있습니다">
+            <button class="btn ghost" type="submit" style="width:auto;padding:0 10px">이 문장만 다시 만들기</button>
           </form>
           {% endif %}
         </td>
@@ -73,6 +98,7 @@
       {% endfor %}
     </tbody>
   </table>
+  </div>
 </div>
 {% endif %}
 

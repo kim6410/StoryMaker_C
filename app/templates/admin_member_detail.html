@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}회원 상세 - {{ app_name }}{% endblock %}
+{% block content %}
+{% set u = detail.user %}
+<div class="page-head">
+  <p><a href="/admin/members" style="color:var(--muted)">&larr; 회원관리로 돌아가기</a></p>
+  <h1>{{ u.display_name or u.email }} <span class="badge {{ 'ok' if u.status == 'active' else 'muted' }}">{{ '활성' if u.status == 'active' else '비활성' }}</span></h1>
+  <p>회원 ID {{ u.id }} · 가입일 {{ u.created_at[:10] if u.created_at else '-' }} · 최근 로그인 {{ (u.last_login_at[:16].replace('T',' ') if u.last_login_at else '기록 없음') }}</p>
+</div>
+
+{% if saved %}<div class="card" style="border-color:var(--ok);margin-bottom:14px;color:var(--ok);font-size:13px">변경사항이 저장되었습니다.</div>{% endif %}
+
+<div class="grid cols-3">
+  <div class="card stat"><div class="num">{{ detail.total_projects }}</div><div class="label">전체 작업 수</div></div>
+  <div class="card stat"><div class="num">{{ detail.completed_projects }}</div><div class="label">완성 콘텐츠 수</div></div>
+  <div class="card stat"><div class="num">{{ detail.companies|length }}</div><div class="label">등록 업체 수</div></div>
+</div>
+
+<div class="card" style="margin-top:14px">
+  <h3 style="margin-top:0">계정 정보</h3>
+  <table>
+    <tbody>
+      <tr><td>이메일</td><td>{{ u.email }}</td></tr>
+      <tr><td>역할</td><td>{% if u.role == 'admin' %}<span class="badge admin">관리자</span>{% else %}일반 회원{% endif %}</td></tr>
+      <tr><td>이메일 인증</td><td>{% if u.email_verified %}<span class="badge ok">인증됨</span>{% else %}<span class="badge warn">미인증</span>{% endif %}</td></tr>
+      <tr><td>구독 플랜</td>
+        <td>
+          {% if detail.subscription %}
+          {{ detail.subscription.plan_name }} (월 {{ detail.subscription.monthly_project_limit }}건 · 보관함 {{ detail.subscription.archive_item_limit }}개)
+          · {{ detail.subscription.period_started_at[:10] }} ~ {{ detail.subscription.period_ends_at[:10] }}
+          {% else %}
+          기본(무료) — 별도 구독 없음
+          {% endif %}
+        </td>
+      </tr>
+      <tr><td>사용량 조정(관리자 override)</td><td>{{ u.usage_limit_override if u.usage_limit_override is not none else '적용 안 함' }}</td></tr>
+    </tbody>
+  </table>
+
+  <div style="display:flex;gap:10px;margin-top:14px;flex-wrap:wrap">
+    {% if u.status == 'active' %}
+    <button class="btn danger" style="width:auto;padding:0 16px" data-modal-open="#status-modal">계정 비활성화</button>
+    {% else %}
+    <form method="post" action="/admin/members/{{ u.id }}/status" style="margin:0">
+      <input type="hidden" name="new_status" value="active">
+      <button class="btn" type="submit" style="width:auto;padding:0 16px" data-once>계정 다시 활성화</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+<div class="grid cols-2" style="margin-top:14px;align-items:start">
+  <div class="card">
+    <h3 style="margin-top:0">플랜 변경</h3>
+    <form method="post" action="/admin/members/{{ u.id }}/plan">
+      <div class="field">
+        <label>플랜 선택</label>
+        <select name="plan_id" required>
+          {% for p in plans %}
+          <option value="{{ p.id }}">{{ p.name }} (월 {{ p.monthly_project_limit }}건 · {{ '{:,}'.format(p.price_krw) }}원)</option>
+          {% endfor %}
+        </select>
+      </div>
+      <button class="btn secondary" type="submit" style="width:auto;padding:0 16px" data-once>1년 구독으로 변경</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0">사용량 조정</h3>
+    <form method="post" action="/admin/members/{{ u.id }}/usage">
+      <div class="field">
+        <label>이번 달 제작 가능 건수(비워두면 플랜 기본값 사용)</label>
+        <input type="number" name="usage_limit_override" min="0" value="{{ u.usage_limit_override if u.usage_limit_override is not none else '' }}">
+      </div>
+      <button class="btn secondary" type="submit" style="width:auto;padding:0 16px" data-once>저장</button>
+    </form>
+  </div>
+</div>
+
+<div class="card" style="margin-top:14px">
+  <h3 style="margin-top:0">관리자 메모</h3>
+  <form method="post" action="/admin/members/{{ u.id }}/notes">
+    <div class="field">
+      <textarea name="admin_notes" placeholder="이 회원에 대한 내부 메모(사용자에게 보이지 않음)">{{ u.admin_notes or '' }}</textarea>
+    </div>
+    <button class="btn secondary" type="submit" style="width:auto;padding:0 16px" data-once>메모 저장</button>
+  </form>
+</div>
+
+<div class="card" style="margin-top:14px">
+  <h3 style="margin-top:0">등록 업체 ({{ detail.companies|length }})</h3>
+  {% if detail.companies %}
+  <div class="table-wrap">
+  <table>
+    <thead><tr><th>업체명</th><th>대표자</th><th>전화번호</th><th>업종</th><th>지역</th><th>기본</th></tr></thead>
+    <tbody>
+      {% for c in detail.companies %}
+      <tr>
+        <td>{{ c.company_name }}</td><td>{{ c.owner_name or '-' }}</td><td>{{ c.phone_number or '-' }}</td>
+        <td>{{ c.industry or '-' }}</td><td>{{ c.region or '-' }}</td>
+        <td>{% if c.is_default %}<span class="badge ok">기본</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <div class="empty">등록된 업체가 없습니다.</div>
+  {% endif %}
+</div>
+
+<div class="modal-backdrop" id="status-modal">
+  <div class="modal">
+    <h3>이 회원을 비활성화할까요?</h3>
+    <p style="color:var(--muted);font-size:13px">비활성화하면 이 회원은 로그인 상태여도 보호된 화면 접근이 제한됩니다. 데이터는 삭제되지 않으며 언제든 다시 활성화할 수 있습니다.</p>
+    <div class="modal-actions">
+      <button class="btn secondary" data-modal-close>취소</button>
+      <form method="post" action="/admin/members/{{ u.id }}/status" style="flex:1;margin:0">
+        <input type="hidden" name="new_status" value="inactive">
+        <button class="btn danger" type="submit" style="width:100%" data-once>비활성화</button>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,22 @@
+{# 단계10A 공통 제작 단계표시기. steps=build_step_states(project) 결과, job_uid=현재 작업 #}
+<div class="steps" role="list" aria-label="제작 진행 단계">
+  {% for s in steps %}
+  {% set hrefs = {
+    'info': '/content/job/' ~ job_uid,
+    'generate': '/content/job/' ~ job_uid,
+    'channels': '/content/job/' ~ job_uid ~ '/channels',
+    'tts': '/content/job/' ~ job_uid ~ '/tts',
+    'mp4': '/content/job/' ~ job_uid ~ '/mp4',
+    'done': '/archive/' ~ job_uid,
+  } %}
+  {% if s.state in ('done', 'current', 'failed') %}
+  <a class="step {{ s.state }} step-link" href="{{ hrefs[s.key] }}" role="listitem">
+    <span class="step-num" data-index="{{ loop.index }}" aria-hidden="true"></span>{{ s.label }}
+  </a>
+  {% else %}
+  <span class="step {{ s.state }}" role="listitem" aria-disabled="true" title="이전 단계를 먼저 완료해 주세요">
+    <span class="step-num" data-index="{{ loop.index }}" aria-hidden="true"></span>{{ s.label }}
+  </span>
+  {% endif %}
+  {% endfor %}
+</div>

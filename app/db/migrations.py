@@ -441,6 +441,18 @@ def _migration_010_local_render(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migration_011_admin_fields(conn: sqlite3.Connection) -> None:
+    """단계10: 관리자 회원관리에서 쓰는 메모·사용량 조정 필드를 users에 얹는다.
+    별도 테이블로 분리하지 않는 이유는 사용자당 값이 각각 최대 1개뿐이라
+    JOIN 없이 users 조회 한 번으로 회원 목록에 바로 표시하기 위해서다."""
+    conn.executescript(
+        """
+        ALTER TABLE users ADD COLUMN admin_notes TEXT NOT NULL DEFAULT '';
+        ALTER TABLE users ADD COLUMN usage_limit_override INTEGER;
+        """
+    )
+
+
 # 순서대로 등록. 이미 적용된 번호는 다시 실행하지 않는다.
 MIGRATIONS: list[Migration] = [
     (1, "initial_schema", _migration_001_initial_schema),
@@ -453,6 +465,7 @@ MIGRATIONS: list[Migration] = [
     (8, "tts_subtitle", _migration_008_tts_subtitle),
     (9, "mp4_render", _migration_009_mp4_render),
     (10, "local_render", _migration_010_local_render),
+    (11, "admin_fields", _migration_011_admin_fields),
 ]
 
 
