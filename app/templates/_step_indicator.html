@@ -2,11 +2,11 @@
 <div class="steps" role="list" aria-label="제작 진행 단계">
   {% for s in steps %}
   {% set hrefs = {
-    'info': '/content/job/' ~ job_uid,
-    'generate': '/content/job/' ~ job_uid,
-    'channels': '/content/job/' ~ job_uid ~ '/channels',
-    'tts': '/content/job/' ~ job_uid ~ '/tts',
-    'mp4': '/content/job/' ~ job_uid ~ '/mp4',
+    'info': '#section-info',
+    'generate': '#section-info',
+    'channels': '#section-channels',
+    'tts': '#section-tts',
+    'mp4': '#section-mp4',
     'done': '/archive/' ~ job_uid,
   } %}
   {% if s.state in ('done', 'current', 'failed') %}

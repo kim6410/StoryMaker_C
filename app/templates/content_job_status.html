@@ -3,12 +3,12 @@
 {% block content %}
 <div class="page-head">
   <h1>{{ project.title }}</h1>
-  <p>작업 번호: {{ project.job_uid }} · 생성일: {{ project.created_at[:16] }}</p>
+  <p>작업 번호: {{ project.job_uid }} · 생성일: {{ project.created_at[:16] }} · 위에서 아래로 순서대로 진행하면 됩니다.</p>
 </div>
 
 {% include "_step_indicator.html" %}
 
-<div class="card">
+<div class="card" id="section-info">
   <h3 style="margin-top:0">현재 상태</h3>
   <span class="badge {{ 'ok' if project.status == 'completed' else ('warn' if project.status == 'failed' else 'muted') }}">{{ status_label(project.status) }}</span>
 
@@ -43,11 +43,6 @@
       · 소요 {{ last_generation.latency_ms }}ms
     </p>
     {% endif %}
-
-    {% if project.status == 'content_ready' %}
-    <a class="btn secondary" style="margin-top:14px;width:auto;padding:0 20px"
-       href="/content/job/{{ project.job_uid }}/channels">SNS 8채널 결과 보기</a>
-    {% endif %}
   </div>
   {% endif %}
 </div>
@@ -74,5 +69,456 @@
   </table>
 </div>
 
-<a class="btn secondary" style="margin-top:16px;width:auto;padding:0 20px" href="/dashboard">대시보드로 돌아가기</a>
+<div class="card" style="margin-top:14px" id="section-channels">
+  <div class="page-head" style="margin-bottom:12px">
+    <h3 style="margin:0">2단계 · SNS 8채널 결과</h3>
+    <p style="margin:4px 0 0">채널마다 직접 수정, 원복, 재생성할 수 있습니다.</p>
+  </div>
+
+  {% if channel_error_message %}
+  <div class="card" style="border-color:var(--danger);margin-bottom:14px">
+    <p style="color:var(--danger);font-size:12px;margin:0;font-weight:800">채널 재생성에 실패했습니다</p>
+    <p style="color:var(--muted);font-size:12px;margin:4px 0 0">{{ channel_error_message }}</p>
+    <p style="color:var(--muted);font-size:11px;margin:6px 0 0">다른 채널의 결과는 영향받지 않고 그대로 남아 있습니다.</p>
+  </div>
+  {% endif %}
+
+  <div class="tabs" data-tabs>
+    {% for ch in channels %}
+    <button type="button" class="tab {{ 'active' if loop.first else '' }}" data-tab="{{ ch.code }}">
+      {{ ch.label }}
+      {% if not ch.row %}<span class="badge muted" style="margin-left:6px">미생성</span>
+      {% elif ch.row.is_edited %}<span class="badge warn" style="margin-left:6px">수정됨</span>
+      {% else %}<span class="badge ok" style="margin-left:6px">완료</span>{% endif %}
+    </button>
+    {% endfor %}
+  </div>
+
+  {% for ch in channels %}
+  <div data-tab-panel="{{ ch.code }}" style="{{ '' if loop.first else 'display:none' }}">
+    {% if ch.row %}
+    <form method="post" action="/content/job/{{ project.job_uid }}/channels/{{ ch.code }}/edit" data-async-submit
+          data-progress-messages="저장하고 있습니다">
+      <label style="font-size:11px;color:var(--muted)">제목</label>
+      <input type="text" name="title" value="{{ ch.row.title }}" style="width:100%;margin-bottom:6px">
+      <label style="font-size:11px;color:var(--muted)">
+        본문 <span id="len-{{ ch.code }}" style="color:var(--muted);font-weight:400">({{ ch.row.body|length }}자)</span>
+      </label>
+      <textarea name="body" rows="6" style="width:100%;margin-bottom:6px"
+                oninput="document.getElementById('len-{{ ch.code }}').textContent = '(' + this.value.length + '자)'">{{ ch.row.body }}</textarea>
+      <label style="font-size:11px;color:var(--muted)">CTA(행동 유도 문구)</label>
+      <input type="text" name="cta" value="{{ ch.row.cta }}" style="width:100%;margin-bottom:6px">
+      <label style="font-size:11px;color:var(--muted)">해시태그(쉼표로 구분)</label>
+      <input type="text" name="hashtags" value="{{ ch.hashtags|join(', ') }}" style="width:100%;margin-bottom:8px">
+
+      {% if ch.code == 'shortform_script' and video_script %}
+      <div class="card" style="margin-bottom:8px">
+        <b style="font-size:12px">내레이션 원고</b>
+        <p style="margin:4px 0;color:var(--muted);font-size:13px">{{ video_script.voice_script }}</p>
+        <b style="font-size:12px">장면 문장 ({{ scene_sentences|length }}개)</b>
+        <ol style="margin:4px 0 0 18px;padding:0;color:var(--muted);font-size:13px">
+          {% for s in scene_sentences %}<li>{{ s }}</li>{% endfor %}
+        </ol>
+      </div>
+      {% endif %}
+
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn ghost" type="submit" style="width:auto;padding:0 14px">저장</button>
+        <button class="btn ghost" type="button" data-copy="#chan-{{ ch.code }}" style="width:auto;padding:0 14px">복사</button>
+      </div>
+    </form>
+    <div id="chan-{{ ch.code }}" style="display:none">{{ ch.row.title }}
+{{ ch.row.body }}
+{{ ch.row.cta }}
+{{ ch.hashtags|join(' ') }}</div>
+
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+      <form method="post" action="/content/job/{{ project.job_uid }}/channels/{{ ch.code }}/regenerate"
+            onsubmit="return confirm('이 채널을 다시 생성하면 지금 내용(수정한 내용 포함)이 새 결과로 바뀝니다. 계속할까요?');"
+            data-async-submit data-progress-messages="이 채널만 다시 만들고 있습니다">
+        <button class="btn secondary" type="submit" style="width:auto;padding:0 14px">이 채널만 재생성</button>
+      </form>
+      {% if ch.row.is_edited %}
+      <form method="post" action="/content/job/{{ project.job_uid }}/channels/{{ ch.code }}/revert">
+        <button class="btn ghost" type="submit" style="width:auto;padding:0 14px">원본으로 되돌리기</button>
+      </form>
+      {% endif %}
+    </div>
+    {% else %}
+    <p style="color:var(--muted);font-size:12px">아직 생성되지 않았습니다.</p>
+    <form method="post" action="/content/job/{{ project.job_uid }}/channels/{{ ch.code }}/regenerate"
+          data-async-submit data-progress-messages="이 채널을 만들고 있습니다">
+      <button class="btn secondary" type="submit" style="width:auto;padding:0 14px">이 채널 생성</button>
+    </form>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+
+<div class="card" style="margin-top:14px" id="section-tts">
+  <div class="page-head" style="margin-bottom:12px">
+    <h3 style="margin:0">3단계 · 음성·자막(TTS·SRT)</h3>
+    <p style="margin:4px 0 0">영상원고를 문장 단위로 실제 음성(TTS)으로 만들고, 실제 음성 길이에 맞춰 자막(SRT)을 만듭니다.</p>
+  </div>
+
+  {% if not has_script %}
+  <p style="color:var(--muted);font-size:12px;margin:0">먼저 위 2단계에서 SNS 8채널(영상원고 포함) 생성을 완료해 주세요.</p>
+  {% else %}
+
+  <form method="post" action="/content/job/{{ project.job_uid }}/tts/generate" data-async-submit
+        data-progress-messages="원고를 문장으로 나누고 있습니다,문장별 음성을 만들고 있습니다,자막 시간을 맞추고 있습니다,저장하고 있습니다">
+    <button class="btn" type="submit" style="width:auto;padding:0 20px">
+      {% if sentences %}TTS·SRT 다시 만들기{% else %}TTS·SRT 만들기{% endif %}
+    </button>
+  </form>
+
+  {% if phone_number %}
+  <p style="color:var(--muted);font-size:12px;margin:12px 0 0">
+    전화번호(화면 표시): <b style="color:var(--text)">{{ phone_number }}</b>
+    <br>TTS 읽기 미리보기: <span style="color:var(--accent)">{{ phone_tts_preview }}</span>
+  </p>
+  {% endif %}
+
+  {% if master %}
+  <p style="color:var(--muted);font-size:12px;margin:10px 0 0">
+    전체 음성 상태: <b class="{{ 'ok' if master.status == 'success' else '' }}" style="color:{{ 'var(--ok)' if master.status == 'success' else 'var(--text)' }}">{{ '완료' if master.status == 'success' else ('실패' if master.status == 'failed' else '대기') }}</b>
+    {% if master.status == 'success' %}· 길이 {{ '%.2f'|format(master.total_duration_seconds) }}초{% endif %}
+  </p>
+  {% if master.status == 'success' %}
+  <audio controls preload="metadata" style="width:100%;margin-top:8px" src="/content/job/{{ project.job_uid }}/tts/audio/full.wav"></audio>
+  <p style="color:var(--muted);font-size:11px;margin:4px 0 0">탐색(구간 이동)이 가능합니다.</p>
+  {% endif %}
+  {% endif %}
+
+  {% if srt %}
+  <p style="color:var(--muted);font-size:12px;margin:10px 0 0">
+    자막(SRT) 상태: <b style="color:{{ 'var(--ok)' if srt.status == 'success' else 'var(--text)' }}">{{ '완료' if srt.status == 'success' else '실패' }}</b>
+    {% if srt.status == 'success' %}
+    · {{ srt.cue_count }}개 자막 · 음성과 자막 오차 {{ '%.3f'|format(srt.drift_seconds) }}초
+    · <a href="/content/job/{{ project.job_uid }}/subtitle/download">SRT 다운로드</a>
+    {% else %}
+    · 자막을 만들지 못했습니다({{ srt.error_code }}). 실패한 문장을 먼저 재생성해 주세요.
+    {% endif %}
+  </p>
+  {% endif %}
+
+  {% if sentences %}
+  <div class="card" style="margin-top:14px">
+    <h3 style="margin-top:0">문장별 타임라인</h3>
+    <div style="display:flex;height:28px;border-radius:8px;overflow:hidden;border:1px solid var(--border)">
+      {% for s in sentences %}
+      <div title="#{{ s.sentence_index + 1 }} · {{ '%.2f'|format(s.duration_seconds) }}초"
+           style="flex:{{ s.duration_seconds if s.duration_seconds > 0 else 0.3 }};
+                  background:{{ 'rgba(74,222,128,.35)' if s.status == 'success' else 'rgba(255,107,107,.35)' }};
+                  border-right:1px solid var(--bg);min-width:2px"></div>
+      {% endfor %}
+    </div>
+    <p style="color:var(--muted);font-size:11px;margin:6px 0 0">문장 길이에 비례한 타임라인입니다(초록: 완료, 빨강: 실패). 각 구간에 마우스를 올리면 번호와 길이가 보입니다.</p>
+  </div>
+
+  <div class="card" style="margin-top:14px">
+    <h3 style="margin-top:0">문장별 음성 ({{ sentences|length }}개)</h3>
+    <div class="table-wrap">
+    <table>
+      <thead><tr><th>#</th><th>자막 텍스트</th><th>상태</th><th>길이</th><th>재생</th><th></th></tr></thead>
+      <tbody>
+        {% for s in sentences %}
+        <tr>
+          <td>{{ s.sentence_index + 1 }}</td>
+          <td style="max-width:320px;white-space:normal">{{ s.original_text }}</td>
+          <td><span class="badge {{ 'ok' if s.status == 'success' else ('muted' if s.status == 'pending' else 'warn') }}">{{ '완료' if s.status == 'success' else ('대기' if s.status == 'pending' else '실패') }}</span></td>
+          <td>{% if s.status == 'success' %}{{ '%.2f'|format(s.duration_seconds) }}초{% else %}-{% endif %}</td>
+          <td>
+            {% if s.status == 'success' %}
+            <audio controls preload="metadata" style="height:28px;max-width:180px" src="/content/job/{{ project.job_uid }}/tts/audio/sentence_{{ '%03d'|format(s.sentence_index) }}.wav"></audio>
+            {% endif %}
+          </td>
+          <td>
+            {% if s.status != 'success' %}
+            <form method="post" action="/content/job/{{ project.job_uid }}/tts/sentence/{{ s.sentence_index }}/regenerate"
+                  data-async-submit data-progress-messages="이 문장만 다시 만들고 있습니다">
+              <button class="btn ghost" type="submit" style="width:auto;padding:0 10px">이 문장만 다시 만들기</button>
+            </form>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </div>
+  {% endif %}
+
+  {% endif %}
+</div>
+
+<div class="card" style="margin-top:14px" id="section-mp4">
+  <div class="page-head" style="margin-bottom:12px">
+    <h3 style="margin:0">4단계 · 영상(MP4) 제작</h3>
+    <p style="margin:4px 0 0">음성·자막·배경음악·업체 정보를 합쳐 최종 영상(MP4)을 만듭니다.</p>
+  </div>
+
+  {% if not has_tts %}
+  <p style="color:var(--muted);font-size:12px;margin:0">먼저 위 3단계에서 음성·자막(TTS·SRT) 만들기를 완료해 주세요.</p>
+  {% else %}
+
+  <div id="renderChoice" class="grid cols-2">
+    <div class="card" style="background:var(--panel-2)">
+      <b style="font-size:13px">내 PC에서 빠르게 만들기</b>
+      <p style="color:var(--muted);font-size:12px;margin:6px 0">내 컴퓨터 성능을 사용합니다. 보통 더 빠르고, 이 브라우저가 지원하지 않거나 실패하면 자동으로 서버 방식으로 전환됩니다.</p>
+      <button class="btn" type="button" id="btnLocalRender" style="width:auto;padding:0 20px" disabled>내 PC에서 만들기</button>
+    </div>
+    <div class="card" style="background:var(--panel-2)">
+      <b style="font-size:13px">서버에서 안정적으로 만들기</b>
+      <p style="color:var(--muted);font-size:12px;margin:6px 0">내 컴퓨터 성능과 무관하게 항상 동작하는 안정적인 방식입니다. 서버 상황에 따라 시간이 조금 더 걸릴 수 있습니다.</p>
+      <form method="post" action="/content/job/{{ project.job_uid }}/mp4/generate" style="margin:0"
+            data-async-submit data-progress-messages="장면을 만들고 있습니다,배경음악과 음성을 합치고 있습니다,영상을 인코딩하고 있습니다,결과를 확인하고 있습니다">
+        <button class="btn secondary" type="submit" style="width:auto;padding:0 20px">서버에서 만들기</button>
+      </form>
+    </div>
+  </div>
+  <p id="capsHint" style="color:var(--muted);font-size:11px;margin:10px 0 0">이 PC의 제작 가능 여부를 확인하고 있습니다...</p>
+  <div id="renderProgress" style="display:none;margin-top:10px">
+    <p id="renderStage" style="color:var(--muted);font-size:12px;margin:0 0 6px">준비 중...</p>
+    <div style="background:rgba(255,255,255,.08);border-radius:6px;overflow:hidden;height:8px">
+      <div id="renderBar" style="background:var(--accent);height:100%;width:0%"></div>
+    </div>
+  </div>
+
+  {% if mp4_error_message %}
+  <div class="card" style="border-color:var(--danger);margin-top:12px">
+    <p style="color:var(--danger);font-size:12px;margin:0;font-weight:800">영상 제작에 실패했습니다</p>
+    <p style="color:var(--muted);font-size:12px;margin:4px 0 0">{{ mp4_error_message }}</p>
+    <p style="color:var(--muted);font-size:11px;margin:6px 0 0">음성·자막·배경음악 선택은 그대로 저장돼 있습니다. 위 버튼으로 영상 단계만 다시 시도할 수 있습니다.</p>
+  </div>
+  {% endif %}
+
+  {% if mp4 and mp4.status == 'success' %}
+  <div class="grid cols-4" style="margin-top:14px">
+    <div class="card stat"><div class="num" style="font-size:16px">{{ '내 PC' if mp4.render_method == 'local' else '서버' }}</div><div class="label">제작 방식</div></div>
+    <div class="card stat"><div class="num" style="font-size:16px">{{ mp4.width }}×{{ mp4.height }}</div><div class="label">해상도 · {{ mp4.fps|int }}fps</div></div>
+    <div class="card stat"><div class="num" style="font-size:16px">{{ '%.1f'|format(mp4.duration_seconds) }}초</div><div class="label">영상 길이</div></div>
+    <div class="card stat"><div class="num" style="font-size:16px">{{ (mp4.file_size_bytes / 1024 / 1024)|round(1) }}MB</div><div class="label">파일 크기</div></div>
+  </div>
+
+  <video id="mp4Player" controls preload="metadata" style="width:100%;max-width:400px;margin-top:14px;border-radius:8px;background:#000"
+         src="/content/job/{{ project.job_uid }}/mp4/video"></video>
+  <p id="mp4LoadingHint" style="color:var(--muted);font-size:11px;margin:4px 0 0">영상을 불러오는 중입니다...</p>
+
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px">
+    <a class="btn secondary" style="width:auto;padding:0 18px" href="/content/job/{{ project.job_uid }}/mp4/video" download>다운로드</a>
+    <a class="btn secondary" style="width:auto;padding:0 18px" href="/archive/{{ project.job_uid }}">보관함으로 이동</a>
+  </div>
+  {% endif %}
+
+  {% if music_mix %}
+  <p style="color:var(--muted);font-size:12px;margin:12px 0 0">
+    배경음악: {{ music_mix.source_relative_path.split('/')[-1] if music_mix.source_relative_path else '사용 안 함' }}
+    · 음량: {{ {'quiet':'잔잔하게','normal':'보통','loud':'조금 크게'}.get(music_mix.volume_level, music_mix.volume_level) }}
+    · 상태: {{ '완료' if music_mix.status == 'success' else '실패' }}
+  </p>
+  {% endif %}
+
+  {% if scenes %}
+  <div class="card" style="margin-top:14px">
+    <h3 style="margin-top:0">장면 구성 ({{ scenes|length }}개)</h3>
+    <div class="table-wrap">
+    <table>
+      <thead><tr><th>#</th><th>시작</th><th>길이</th><th>화면 움직임</th><th>전환</th></tr></thead>
+      <tbody>
+        {% for s in scenes %}
+        <tr>
+          <td>{{ s.scene_index + 1 }}</td>
+          <td>{{ '%.1f'|format(s.start_seconds) }}초</td>
+          <td>{{ '%.1f'|format(s.duration_seconds) }}초</td>
+          <td>{{ zoom_labels.get(s.zoom_type, s.zoom_type) }}</td>
+          <td>{{ '부드러운 전환 (%.1f초)'|format(s.transition_in_seconds) if s.transition_in_seconds > 0 else '컷 전환' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </div>
+  {% endif %}
+
+  {% endif %}
+</div>
+
+<div class="card" style="margin-top:14px" id="section-thumbnail">
+  <div class="page-head" style="margin-bottom:12px">
+    <h3 style="margin:0">5단계 · 대표 썸네일 선택</h3>
+    <p style="margin:4px 0 0">완성된 영상에서 뽑은 9:16 후보 8장 중 1장을 대표 썸네일로 저장합니다. 선택한 1장만 서버에 저장되고, 다시 선택하면 이전 대표 썸네일은 교체됩니다.</p>
+  </div>
+
+  {% if not (mp4 and mp4.status == 'success') %}
+  <p style="color:var(--muted);font-size:12px;margin:0">먼저 위 4단계에서 영상(MP4) 제작을 완료해 주세요.</p>
+  {% else %}
+
+  {% if thumb_saved %}
+  <div class="card" style="border-color:var(--ok);margin-bottom:14px;color:var(--ok);font-size:13px">대표 썸네일이 저장되었습니다.</div>
+  {% endif %}
+  {% if thumb_error_message %}
+  <div class="card" style="border-color:var(--danger);margin-bottom:14px">
+    <p style="color:var(--danger);font-size:12px;margin:0;font-weight:800">문제가 발생했습니다</p>
+    <p style="color:var(--muted);font-size:12px;margin:4px 0 0">{{ thumb_error_message }}</p>
+  </div>
+  {% endif %}
+
+  {% if primary %}
+  <div class="card" style="margin-bottom:14px">
+    <h3 style="margin-top:0">현재 대표 썸네일</h3>
+    <img src="/content/job/{{ project.job_uid }}/thumbnail/image?v={{ primary.id }}" alt="현재 대표 썸네일"
+         style="width:160px;aspect-ratio:9/16;object-fit:cover;border-radius:10px;border:2px solid var(--accent-2)">
+    <div style="margin-top:10px">
+      <a class="btn ghost" href="/content/job/{{ project.job_uid }}/thumbnail/image" download>다운로드</a>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if not has_candidates %}
+  <p style="color:var(--muted);font-size:13px;margin:0 0 12px">아직 썸네일 후보를 만들지 않았습니다. 완성된 영상에서 서로 다른 8개 장면을 뽑아 후보로 보여드립니다.</p>
+  <form method="post" action="/content/job/{{ project.job_uid }}/thumbnail/generate" style="margin:0"
+        data-async-submit data-progress-messages="영상에서 장면을 고르고 있습니다,후보 이미지를 만들고 있습니다">
+    <button class="btn" type="submit" style="width:auto;padding:0 24px">썸네일 8종 후보 만들기</button>
+  </form>
+  {% else %}
+  <h3 style="margin-top:0">썸네일 후보 8종</h3>
+  <div class="thumb-grid" data-thumb-grid role="list" aria-label="썸네일 후보 8종 중 1개 선택">
+    {% for i in candidate_indexes %}
+    <div class="thumb {{ 'selected' if i == selected_index }}" data-thumb-index="{{ i }}" role="listitem"
+         tabindex="0" aria-pressed="{{ 'true' if i == selected_index else 'false' }}"
+         aria-label="후보 {{ i + 1 }}번 선택">
+      <img src="/content/job/{{ project.job_uid }}/thumbnail/candidate/{{ i }}" alt="썸네일 후보 {{ i + 1 }}번" loading="lazy">
+      <span class="check" aria-hidden="true">✓</span>
+    </div>
+    {% endfor %}
+  </div>
+
+  <button class="btn" type="button" style="margin-top:20px;width:auto;padding:0 24px" id="confirmOpenBtn" disabled
+          data-modal-open="#confirm-thumb-modal">이 썸네일로 저장</button>
+  <form method="post" action="/content/job/{{ project.job_uid }}/thumbnail/generate" style="display:inline-block;margin:20px 0 0 10px">
+    <button class="btn ghost" type="submit">후보 다시 만들기</button>
+  </form>
+
+  <div class="modal-backdrop" id="confirm-thumb-modal">
+    <div class="modal">
+      <h3>대표 썸네일로 저장할까요?</h3>
+      <p style="color:var(--muted);font-size:13px">선택한 후보 1개만 서버에 저장됩니다. 기존 대표 썸네일이 있었다면 함께 교체됩니다.</p>
+      <div class="modal-actions">
+        <button class="btn secondary" data-modal-close>취소</button>
+        <form method="post" action="/content/job/{{ project.job_uid }}/thumbnail/select" style="flex:1;margin:0">
+          <input type="hidden" name="candidate_index" id="candidateIndexInput" value="">
+          <button class="btn" type="submit" style="width:100%" data-once>저장</button>
+        </form>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  {% endif %}
+</div>
+
+<div style="display:flex;gap:10px;margin-top:20px;flex-wrap:wrap">
+  <a class="btn secondary" style="width:auto;padding:0 24px" href="/archive/{{ project.job_uid }}">보관함으로 이동</a>
+  <a class="btn secondary" style="width:auto;padding:0 24px" href="/dashboard">대시보드로 돌아가기</a>
+</div>
+{% endblock %}
+{% block scripts %}
+<script src="/static/js/render-capabilities.js"></script>
+<script src="/static/js/local-render-controller.js"></script>
+<script>
+(function () {
+  const jobUid = {{ project.job_uid|tojson }};
+  const btn = document.getElementById('btnLocalRender');
+  const hint = document.getElementById('capsHint');
+  if (!btn || !hint) return;
+  const progressWrap = document.getElementById('renderProgress');
+  const stageEl = document.getElementById('renderStage');
+  const barEl = document.getElementById('renderBar');
+  const stageLabels = {
+    preparing_media: '이미지와 음성을 정리하고 있습니다',
+    encoding_video: '장면을 만들고 있습니다',
+    encoding_audio: '음성과 배경음악을 결합하고 있습니다',
+    muxing: '영상을 압축하고 있습니다',
+    uploading: '서버에 안전하게 저장하고 있습니다',
+    server_rendering: '이 PC에서는 영상 제작이 어려워 서버 방식으로 이어서 만들고 있습니다. 이미 만든 원고·음성·자막은 그대로 사용합니다.',
+  };
+
+  StoryMakerRenderCapabilities.detect().then(function (caps) {
+    if (caps.localRenderReady) {
+      btn.disabled = false;
+      hint.textContent = '이 PC에서 빠른 제작을 사용할 수 있습니다' + (caps.recommendServer ? ' (서버 방식도 안정적입니다).' : '.');
+    } else {
+      hint.textContent = '이 브라우저에서는 내 PC 제작을 사용할 수 없어 서버 방식을 권장합니다.';
+    }
+
+    btn.addEventListener('click', function () {
+      btn.disabled = true;
+      progressWrap.style.display = 'block';
+      StoryMakerLocalRender.startLocalRender(jobUid, caps, {
+        onStage: function (stage) {
+          stageEl.textContent = stageLabels[stage] || stage;
+        },
+        onProgress: function (ratio) {
+          barEl.style.width = Math.round(ratio * 100) + '%';
+        },
+        onFallback: function (reason) {
+          stageEl.textContent = stageLabels.server_rendering;
+        },
+        onDone: function (result) {
+          if (result.ok) {
+            location.reload();
+          } else {
+            stageEl.textContent = '영상 제작에 실패했습니다. 서버 방식으로 다시 시도해 주세요.';
+            btn.disabled = false;
+          }
+        },
+      });
+    });
+  });
+
+  var player = document.getElementById('mp4Player');
+  var loadingHint = document.getElementById('mp4LoadingHint');
+  if (player && loadingHint) {
+    player.addEventListener('loadeddata', function () { loadingHint.style.display = 'none'; });
+    player.addEventListener('error', function () { loadingHint.textContent = '영상을 불러오지 못했습니다. 새로고침 후 다시 시도해 주세요.'; });
+  }
+})();
+
+(function () {
+  "use strict";
+  var grid = document.querySelector("[data-thumb-grid]");
+  if (!grid) return;
+  var confirmBtn = document.getElementById("confirmOpenBtn");
+  var hiddenInput = document.getElementById("candidateIndexInput");
+  var cards = Array.prototype.slice.call(grid.querySelectorAll(".thumb"));
+
+  function selectCard(card) {
+    cards.forEach(function (c) {
+      c.classList.remove("selected");
+      c.setAttribute("aria-pressed", "false");
+    });
+    card.classList.add("selected");
+    card.setAttribute("aria-pressed", "true");
+    hiddenInput.value = card.getAttribute("data-thumb-index");
+    confirmBtn.removeAttribute("disabled");
+  }
+
+  cards.forEach(function (card) {
+    card.addEventListener("click", function () { selectCard(card); });
+    card.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" || e.key === " " || e.key === "Spacebar") {
+        e.preventDefault();
+        selectCard(card);
+      }
+    });
+  });
+
+  var preselected = grid.querySelector(".thumb.selected");
+  if (preselected) {
+    hiddenInput.value = preselected.getAttribute("data-thumb-index");
+    confirmBtn.removeAttribute("disabled");
+  }
+})();
+</script>
 {% endblock %}

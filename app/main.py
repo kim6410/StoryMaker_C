@@ -309,7 +309,7 @@ def create_content_job(
         metadata_json=f'{{"ok": {str(outcome.ok).lower()}, "error_code": "{outcome.error_code}"}}',
     )
     if outcome.ok:
-        return RedirectResponse(url=f"/content/job/{project['job_uid']}/channels", status_code=303)
+        return RedirectResponse(url=f"/content/job/{project['job_uid']}#section-channels", status_code=303)
     return RedirectResponse(
         url=f"/content/job/{project['job_uid']}?gen_error={outcome.error_code}", status_code=303
     )
@@ -328,16 +328,28 @@ def _get_owned_project_or_none(job_uid: str, user: dict):
 
 
 @app.get("/content/job/{job_uid}")
-def content_job_status(request: Request, job_uid: str, gen_error: str = ""):
+def content_job_status(
+    request: Request, job_uid: str, gen_error: str = "", channel_error: str = "",
+    mp4_error: str = "", thumb_error: str = "", thumb_saved: int = 0, selected_index: int = -1,
+):
+    """단계11 보완: 입력→SNS8채널→음성자막→MP4→썸네일까지 예전에는 페이지 5개로 나뉘어
+    있었지만(Dell Beta의 "딸깍 제작" 한 페이지 UX 참고), 이제 이 한 라우트가 전부 모아서
+    한 화면에 위→아래로 이어서 보여준다. 각 하위 기능(채널 재생성, TTS 문장별 재생성,
+    MP4 로컬/서버 렌더, 썸네일 후보·선택)의 실제 처리 로직과 라우트는 전혀 바꾸지 않고,
+    그 라우트들이 끝나면 이 허브 URL로 돌아오도록 리다이렉트 대상만 바꿨다(기존 정상
+    기능 보존 우선)."""
     import json
     user = _require_login_or_redirect(request)
     if not user:
         return RedirectResponse(url="/login", status_code=303)
     from app.db import repository as repo
-    from app.constants import GEMINI_ERROR_CODES
+    from app.constants import CHANNEL_CODES, CHANNEL_LABELS, GEMINI_ERROR_CODES
+    from app.content.steps import build_step_states
+
     project = _get_owned_project_or_none(job_uid, user)
     if not project:
         return RedirectResponse(url="/content/new")
+
     snapshot = json.loads(project["input_snapshot_json"] or "{}")
     gemini_configured = bool((os.getenv("GEMINI_API_KEY") or "").strip())
     result = repo.get_latest_generation_result_for_project(project["id"])
@@ -349,11 +361,63 @@ def content_job_status(request: Request, job_uid: str, gen_error: str = ""):
     if gen_error and gen_error in GEMINI_ERROR_CODES:
         from app.ai.service import USER_ERROR_MESSAGES
         gen_error_message = USER_ERROR_MESSAGES.get(gen_error, "")
-    from app.content.steps import build_step_states
+
+    # SNS 8채널
+    rows_by_code = {r["channel_code"]: r for r in repo.list_channel_results_for_project(project["id"])}
+    channels = []
+    for code in CHANNEL_CODES:
+        row = rows_by_code.get(code)
+        channels.append({
+            "code": code, "label": CHANNEL_LABELS[code], "row": row,
+            "hashtags": json.loads(row["hashtags_json"]) if row else [],
+        })
+    video_script = repo.get_video_script_for_project(project["id"])
+    scene_sentences = json.loads(video_script["scene_sentences_json"]) if video_script else []
+    channel_error_message = ""
+    if channel_error and channel_error in GEMINI_ERROR_CODES:
+        from app.ai.service import USER_ERROR_MESSAGES
+        channel_error_message = USER_ERROR_MESSAGES.get(channel_error, "")
+
+    # 음성·자막(TTS/SRT)
+    sentences = repo.list_tts_sentences_for_project(project["id"])
+    master = repo.get_tts_master_for_project(project["id"])
+    srt = repo.get_srt_for_project(project["id"])
+    phone_number = snapshot.get("phone_number", "")
+    phone_tts_preview = ""
+    if phone_number:
+        from app.tts.normalizer import normalize_for_tts
+        phone_tts_preview = normalize_for_tts(phone_number)
+
+    # 영상(MP4)
+    mp4 = repo.get_mp4_for_project(project["id"])
+    music_mix = repo.get_music_mix_for_project(project["id"])
+    scenes = repo.list_scenes_for_project(project["id"])
+    has_tts = bool(master and master["status"] == "success" and srt and srt["status"] == "success")
+    mp4_error_message = ""
+    if mp4_error:
+        from app.media.service import USER_MP4_ERROR_MESSAGES
+        mp4_error_message = USER_MP4_ERROR_MESSAGES.get(mp4_error, "")
+    zoom_labels = {"zoom_in": "천천히 확대", "zoom_out": "천천히 축소", "static": "고정 화면"}
+
+    # 대표 썸네일
+    from app.media import thumbnail_service as thumbsvc
+    primary = repo.get_primary_thumbnail_for_project(project["id"])
+    has_candidates = thumbsvc.candidates_ready(job_uid)
+    thumb_error_message = thumbsvc.USER_THUMBNAIL_ERROR_MESSAGES.get(thumb_error, "")
+
     return templates.TemplateResponse("content_job_status.html", _ctx(
         request, user, active="content_new", project=project, snapshot=snapshot,
         gemini_configured=gemini_configured, result=result, last_generation=last_generation,
         gen_error_message=gen_error_message, steps=build_step_states(project),
+        channels=channels, video_script=video_script, scene_sentences=scene_sentences,
+        channel_error_message=channel_error_message,
+        sentences=sentences, master=master, srt=srt, has_script=bool(video_script),
+        phone_number=phone_number, phone_tts_preview=phone_tts_preview,
+        mp4=mp4, music_mix=music_mix, scenes=scenes, has_tts=has_tts,
+        mp4_error_message=mp4_error_message, zoom_labels=zoom_labels,
+        primary=primary, has_candidates=has_candidates,
+        candidate_indexes=list(range(thumbsvc.CANDIDATE_COUNT)),
+        thumb_error_message=thumb_error_message, thumb_saved=thumb_saved, selected_index=selected_index,
     ))
 
 
@@ -379,47 +443,16 @@ def content_job_generate(request: Request, job_uid: str):
         metadata_json=f'{{"ok": {str(outcome.ok).lower()}, "error_code": "{outcome.error_code}"}}',
     )
     if outcome.ok:
-        return RedirectResponse(url=f"/content/job/{job_uid}/channels", status_code=303)
+        return RedirectResponse(url=f"/content/job/{job_uid}#section-channels", status_code=303)
     return RedirectResponse(url=f"/content/job/{job_uid}?gen_error={outcome.error_code}", status_code=303)
 
 
 @app.get("/content/job/{job_uid}/channels")
 def content_job_channels_page(request: Request, job_uid: str, channel_error: str = ""):
-    import json
-    user = _require_login_or_redirect(request)
-    if not user:
-        return RedirectResponse(url="/login", status_code=303)
-    project = _get_owned_project_or_none(job_uid, user)
-    if not project:
-        return RedirectResponse(url="/content/new")
-
-    from app.db import repository as repo
-    from app.constants import CHANNEL_CODES, CHANNEL_LABELS, GEMINI_ERROR_CODES
-
-    rows_by_code = {r["channel_code"]: r for r in repo.list_channel_results_for_project(project["id"])}
-    channels = []
-    for code in CHANNEL_CODES:
-        row = rows_by_code.get(code)
-        channels.append({
-            "code": code,
-            "label": CHANNEL_LABELS[code],
-            "row": row,
-            "hashtags": json.loads(row["hashtags_json"]) if row else [],
-        })
-    video_script = repo.get_video_script_for_project(project["id"])
-    scene_sentences = json.loads(video_script["scene_sentences_json"]) if video_script else []
-
-    channel_error_message = ""
-    if channel_error and channel_error in GEMINI_ERROR_CODES:
-        from app.ai.service import USER_ERROR_MESSAGES
-        channel_error_message = USER_ERROR_MESSAGES.get(channel_error, "")
-
-    from app.content.steps import build_step_states
-    return templates.TemplateResponse("content_job_channels.html", _ctx(
-        request, user, active="content_new", project=project, channels=channels,
-        video_script=video_script, scene_sentences=scene_sentences,
-        channel_error_message=channel_error_message, steps=build_step_states(project),
-    ))
+    """예전 개별 페이지 URL. 단계11부터 /content/job/{job_uid} 한 페이지로 합쳐졌으므로
+    같은 정보가 담긴 허브 URL로 그대로 이어준다(기존 북마크·링크 호환)."""
+    suffix = f"?channel_error={channel_error}" if channel_error else ""
+    return RedirectResponse(url=f"/content/job/{job_uid}{suffix}#section-channels", status_code=303)
 
 
 @app.post("/content/job/{job_uid}/channels/{channel_code}/regenerate")
@@ -437,16 +470,16 @@ def content_job_channel_regenerate(request: Request, job_uid: str, channel_code:
         outcome = regenerate_channel_for_project(project, channel_code)
     except Exception:
         return RedirectResponse(
-            url=f"/content/job/{job_uid}/channels?channel_error=unknown_provider_error", status_code=303
+            url=f"/content/job/{job_uid}?channel_error=unknown_provider_error#section-channels", status_code=303
         )
     repo.write_audit_log(
         user["id"], "channel_regenerated", target_type="project", target_id=project["id"],
         metadata_json=f'{{"channel": "{channel_code}", "ok": {str(outcome.ok).lower()}}}',
     )
     if outcome.ok:
-        return RedirectResponse(url=f"/content/job/{job_uid}/channels", status_code=303)
+        return RedirectResponse(url=f"/content/job/{job_uid}#section-channels", status_code=303)
     return RedirectResponse(
-        url=f"/content/job/{job_uid}/channels?channel_error={outcome.error_code}", status_code=303
+        url=f"/content/job/{job_uid}?channel_error={outcome.error_code}#section-channels", status_code=303
     )
 
 
@@ -466,7 +499,7 @@ def content_job_channel_edit(
     from app.db import repository as repo
     from app.constants import CHANNEL_CODES
     if channel_code not in CHANNEL_CODES:
-        return RedirectResponse(url=f"/content/job/{job_uid}/channels", status_code=303)
+        return RedirectResponse(url=f"/content/job/{job_uid}#section-channels", status_code=303)
 
     hashtag_list = [h.strip() for h in hashtags.split(",") if h.strip()]
     repo.update_channel_result_manual_edit(
@@ -474,7 +507,7 @@ def content_job_channel_edit(
         json.dumps(hashtag_list, ensure_ascii=False), cta.strip(),
     )
     repo.write_audit_log(user["id"], "channel_manual_edit", target_type="project", target_id=project["id"])
-    return RedirectResponse(url=f"/content/job/{job_uid}/channels", status_code=303)
+    return RedirectResponse(url=f"/content/job/{job_uid}#section-channels", status_code=303)
 
 
 @app.post("/content/job/{job_uid}/channels/{channel_code}/revert")
@@ -489,7 +522,7 @@ def content_job_channel_revert(request: Request, job_uid: str, channel_code: str
     from app.db import repository as repo
     repo.revert_channel_result(project["id"], channel_code)
     repo.write_audit_log(user["id"], "channel_reverted", target_type="project", target_id=project["id"])
-    return RedirectResponse(url=f"/content/job/{job_uid}/channels", status_code=303)
+    return RedirectResponse(url=f"/content/job/{job_uid}#section-channels", status_code=303)
 
 
 @app.post("/content/job/{job_uid}/tts/generate")
@@ -512,7 +545,7 @@ def content_job_tts_generate(request: Request, job_uid: str):
     if outcome.ok:
         from app.subtitle.srt_builder import build_srt_for_project
         build_srt_for_project(project)
-    return RedirectResponse(url=f"/content/job/{job_uid}/tts", status_code=303)
+    return RedirectResponse(url=f"/content/job/{job_uid}#section-tts", status_code=303)
 
 
 @app.post("/content/job/{job_uid}/tts/sentence/{sentence_index}/regenerate")
@@ -531,36 +564,13 @@ def content_job_tts_sentence_regenerate(request: Request, job_uid: str, sentence
     if outcome.ok and outcome.failed_sentences == 0:
         from app.subtitle.srt_builder import build_srt_for_project
         build_srt_for_project(project)
-    return RedirectResponse(url=f"/content/job/{job_uid}/tts", status_code=303)
+    return RedirectResponse(url=f"/content/job/{job_uid}#section-tts", status_code=303)
 
 
 @app.get("/content/job/{job_uid}/tts")
 def content_job_tts_page(request: Request, job_uid: str):
-    user = _require_login_or_redirect(request)
-    if not user:
-        return RedirectResponse(url="/login", status_code=303)
-    project = _get_owned_project_or_none(job_uid, user)
-    if not project:
-        return RedirectResponse(url="/content/new")
-
-    from app.db import repository as repo
-    sentences = repo.list_tts_sentences_for_project(project["id"])
-    master = repo.get_tts_master_for_project(project["id"])
-    srt = repo.get_srt_for_project(project["id"])
-    video_script = repo.get_video_script_for_project(project["id"])
-    from app.content.steps import build_step_states
-    import json as _json
-    snapshot = _json.loads(project.get("input_snapshot_json") or "{}")
-    phone_number = snapshot.get("phone_number", "")
-    phone_tts_preview = ""
-    if phone_number:
-        from app.tts.normalizer import normalize_for_tts
-        phone_tts_preview = normalize_for_tts(phone_number)
-    return templates.TemplateResponse("content_job_tts.html", _ctx(
-        request, user, active="content_new", project=project, sentences=sentences,
-        master=master, srt=srt, has_script=bool(video_script), video_script=video_script,
-        steps=build_step_states(project), phone_number=phone_number, phone_tts_preview=phone_tts_preview,
-    ))
+    """예전 개별 페이지 URL. 단계11부터 허브 페이지로 합쳐졌으므로 그대로 이어준다."""
+    return RedirectResponse(url=f"/content/job/{job_uid}#section-tts", status_code=303)
 
 
 @app.get("/content/job/{job_uid}/tts/audio/{filename}")
@@ -626,39 +636,15 @@ def content_job_mp4_generate(request: Request, job_uid: str):
         metadata_json=f'{{"ok": {str(outcome.ok).lower()}, "error_code": "{outcome.error_code}"}}',
     )
     if outcome.ok:
-        return RedirectResponse(url=f"/content/job/{job_uid}/mp4", status_code=303)
-    return RedirectResponse(url=f"/content/job/{job_uid}/mp4?mp4_error={outcome.error_code}", status_code=303)
+        return RedirectResponse(url=f"/content/job/{job_uid}#section-mp4", status_code=303)
+    return RedirectResponse(url=f"/content/job/{job_uid}?mp4_error={outcome.error_code}#section-mp4", status_code=303)
 
 
 @app.get("/content/job/{job_uid}/mp4")
 def content_job_mp4_page(request: Request, job_uid: str, mp4_error: str = ""):
-    user = _require_login_or_redirect(request)
-    if not user:
-        return RedirectResponse(url="/login", status_code=303)
-    project = _get_owned_project_or_none(job_uid, user)
-    if not project:
-        return RedirectResponse(url="/content/new")
-
-    from app.db import repository as repo
-    mp4 = repo.get_mp4_for_project(project["id"])
-    music_mix = repo.get_music_mix_for_project(project["id"])
-    scenes = repo.list_scenes_for_project(project["id"])
-    master = repo.get_tts_master_for_project(project["id"])
-    srt = repo.get_srt_for_project(project["id"])
-    has_tts = bool(master and master["status"] == "success" and srt and srt["status"] == "success")
-
-    mp4_error_message = ""
-    if mp4_error:
-        from app.media.service import USER_MP4_ERROR_MESSAGES
-        mp4_error_message = USER_MP4_ERROR_MESSAGES.get(mp4_error, "")
-
-    from app.content.steps import build_step_states
-    zoom_labels = {"zoom_in": "천천히 확대", "zoom_out": "천천히 축소", "static": "고정 화면"}
-    return templates.TemplateResponse("content_job_mp4.html", _ctx(
-        request, user, active="content_new", project=project, mp4=mp4, music_mix=music_mix,
-        scenes=scenes, has_tts=has_tts, mp4_error_message=mp4_error_message,
-        steps=build_step_states(project), zoom_labels=zoom_labels,
-    ))
+    """예전 개별 페이지 URL. 단계11부터 허브 페이지로 합쳐졌으므로 그대로 이어준다."""
+    suffix = f"?mp4_error={mp4_error}" if mp4_error else ""
+    return RedirectResponse(url=f"/content/job/{job_uid}{suffix}#section-mp4", status_code=303)
 
 
 @app.get("/content/job/{job_uid}/mp4/video")
@@ -773,27 +759,16 @@ async def content_job_mp4_render_diagnostics(request: Request, job_uid: str):
 @app.get("/content/job/{job_uid}/thumbnail")
 def content_job_thumbnail_page(request: Request, job_uid: str, thumb_error: str = "", saved: int = 0,
                                 selected_index: int = -1):
-    user = _require_login_or_redirect(request)
-    if not user:
-        return RedirectResponse(url="/login", status_code=303)
-    project = _get_owned_project_or_none(job_uid, user)
-    if not project:
-        return RedirectResponse(url="/content/new")
-
-    from app.db import repository as repo
-    from app.media import thumbnail_service as thumbsvc
-
-    primary = repo.get_primary_thumbnail_for_project(project["id"])
-    has_candidates = thumbsvc.candidates_ready(job_uid)
-    thumb_error_message = thumbsvc.USER_THUMBNAIL_ERROR_MESSAGES.get(thumb_error, "")
-
-    from app.content.steps import build_step_states
-    return templates.TemplateResponse("content_thumbnail.html", _ctx(
-        request, user, active="content_new", project=project, primary=primary,
-        has_candidates=has_candidates, candidate_indexes=list(range(thumbsvc.CANDIDATE_COUNT)),
-        thumb_error_message=thumb_error_message, saved=saved, selected_index=selected_index,
-        steps=build_step_states(project),
-    ))
+    """예전 개별 페이지 URL. 단계11부터 허브 페이지로 합쳐졌으므로 그대로 이어준다."""
+    params = []
+    if thumb_error:
+        params.append(f"thumb_error={thumb_error}")
+    if saved:
+        params.append("thumb_saved=1")
+    if selected_index >= 0:
+        params.append(f"selected_index={selected_index}")
+    suffix = ("?" + "&".join(params)) if params else ""
+    return RedirectResponse(url=f"/content/job/{job_uid}{suffix}#section-thumbnail", status_code=303)
 
 
 @app.post("/content/job/{job_uid}/thumbnail/generate")
@@ -813,8 +788,10 @@ def content_job_thumbnail_generate(request: Request, job_uid: str):
         metadata_json=f'{{"ok": {str(outcome.ok).lower()}, "error_code": "{outcome.error_code}"}}',
     )
     if outcome.ok:
-        return RedirectResponse(url=f"/content/job/{job_uid}/thumbnail", status_code=303)
-    return RedirectResponse(url=f"/content/job/{job_uid}/thumbnail?thumb_error={outcome.error_code}", status_code=303)
+        return RedirectResponse(url=f"/content/job/{job_uid}#section-thumbnail", status_code=303)
+    return RedirectResponse(
+        url=f"/content/job/{job_uid}?thumb_error={outcome.error_code}#section-thumbnail", status_code=303
+    )
 
 
 @app.post("/content/job/{job_uid}/thumbnail/select")
@@ -835,9 +812,12 @@ def content_job_thumbnail_select(request: Request, job_uid: str, candidate_index
     )
     if outcome.ok:
         return RedirectResponse(
-            url=f"/content/job/{job_uid}/thumbnail?saved=1&selected_index={candidate_index}", status_code=303
+            url=f"/content/job/{job_uid}?thumb_saved=1&selected_index={candidate_index}#section-thumbnail",
+            status_code=303,
         )
-    return RedirectResponse(url=f"/content/job/{job_uid}/thumbnail?thumb_error={outcome.error_code}", status_code=303)
+    return RedirectResponse(
+        url=f"/content/job/{job_uid}?thumb_error={outcome.error_code}#section-thumbnail", status_code=303
+    )
 
 
 @app.get("/content/job/{job_uid}/thumbnail/candidate/{index}")
