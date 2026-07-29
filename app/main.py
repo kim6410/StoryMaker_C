@@ -238,7 +238,9 @@ def create_content_job(
     if not user:
         return RedirectResponse(url="/login", status_code=303)
     if not topic.strip():
-        return RedirectResponse(url="/content/new?error=제작+주제를+입력해+주세요.", status_code=303)
+        return RedirectResponse(
+            url=f"/content/new?company_id={company_id}&error=제작+주제를+입력해+주세요.", status_code=303
+        )
 
     from app.db import repository as repo
     from app.content.music import resolve_music_path
@@ -257,6 +259,11 @@ def create_content_job(
     # 스냅샷에 참조만 남겨 다음 단계 확장에 대비한다(미완료 항목 - 업무일지에 기록).
     owned_media_ids = {m["id"] for m in repo.list_company_media(company["id"])}
     selected_media_ids = [mid for mid in media_ids if mid in owned_media_ids]
+    if not selected_media_ids:
+        return RedirectResponse(
+            url=f"/content/new?company_id={company['id']}&error=사진%2F영상을+1개+이상+선택해+주세요.",
+            status_code=303,
+        )
 
     # 마이페이지 업체 정보와 별개로, 이번 제작 요청 당시 값을 스냅샷으로 고정한다.
     # (나중에 업체 정보가 바뀌어도 이 작업의 과거 결과는 변하지 않는다.)
