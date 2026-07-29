@@ -1,0 +1,14 @@
+{% extends "auth_base.html" %}
+{% block title %}StoryMaker{% endblock %}
+{% block content %}
+<div class="auth-sub">사업자를 위한 SNS 콘텐츠 자동 제작 서비스</div>
+
+{% if logged_out %}
+<div class="card" style="font-size:13px;margin-bottom:14px;color:var(--muted)">로그아웃되었습니다.</div>
+{% endif %}
+
+<div style="display:grid;gap:12px;margin-top:8px">
+  <a class="btn" href="/login">로그인</a>
+  <a class="btn secondary" href="/register">회원가입</a>
+</div>
+{% endblock %}

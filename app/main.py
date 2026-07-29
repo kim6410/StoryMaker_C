@@ -102,10 +102,12 @@ def _require_admin_or_none(request: Request):
 # 인증 전 화면
 # ---------------------------------------------------------------------------
 @app.get("/")
-def root(request: Request):
+def root(request: Request, logged_out: int = 0):
     if get_optional_user(request):
         return RedirectResponse(url="/dashboard")
-    return RedirectResponse(url="/login", status_code=303)
+    return templates.TemplateResponse("landing.html", {
+        "request": request, "app_name": "StoryMaker", "logged_out": logged_out,
+    })
 
 
 @app.get("/login")

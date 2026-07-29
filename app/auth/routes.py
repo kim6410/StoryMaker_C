@@ -81,7 +81,7 @@ def do_login(request: Request, response: Response, email: str = Form(...), passw
 def do_logout(request: Request):
     token = request.cookies.get(SESSION_COOKIE_NAME)
     service.logout(token or "")
-    redirect = RedirectResponse(url="/login?logged_out=1", status_code=303)
+    redirect = RedirectResponse(url="/?logged_out=1", status_code=303)
     redirect.delete_cookie(SESSION_COOKIE_NAME, path="/")
     return redirect
 
